@@ -1,10 +1,25 @@
-#include "pfc.h"
-
-#include "pp-winapi.h"
+#include "pfc-lite.h"
 
 #ifdef _WIN32
+#include "win-objects.h"
+#include "array.h"
+#include "pp-winapi.h"
+#include "string_conv.h"
+#include "string_base.h"
+#include "debug.h"
+#include "string-conv-lite.h"
 
-BOOL pfc::winFormatSystemErrorMessage(pfc::string_base & p_out,DWORD p_code) {
+#include "pfc-fb2k-hooks.h"
+
+#include "sortstring.h"
+
+// StrCmpLogicalW()
+#include <Shlwapi.h>
+#pragma comment(lib, "Shlwapi.lib")
+
+namespace pfc {
+
+BOOL winFormatSystemErrorMessageImpl(pfc::string_base & p_out,DWORD p_code) {
 	switch(p_code) {
 	case ERROR_CHILD_NOT_COMPLETE:
 		p_out = "Application cannot be run in Win32 mode.";
@@ -36,6 +51,7 @@ BOOL pfc::winFormatSystemErrorMessage(pfc::string_base & p_out,DWORD p_code) {
 		return TRUE;
 	default:
 		{
+#ifdef PFC_WINDOWS_DESKTOP_APP
 			TCHAR temp[512];
 			if (FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM,0,p_code,0,temp,_countof(temp),0) == 0) return FALSE;
 			for(t_size n=0;n<_countof(temp);n++) {
@@ -48,11 +64,18 @@ BOOL pfc::winFormatSystemErrorMessage(pfc::string_base & p_out,DWORD p_code) {
 			}
 			p_out = stringcvt::string_utf8_from_os(temp,_countof(temp));
 			return TRUE;
+#else
+			return FALSE;
+#endif
 		}
-		break;
 	}
 }
-void pfc::winPrefixPath(pfc::string_base & out, const char * p_path) {
+void winPrefixPath(pfc::string_base & out, const char * p_path) {
+	if (pfc::string_has_prefix(p_path, "..\\") || strstr(p_path, "\\..\\") ) {
+		// do not touch relative paths if we somehow got them here
+		out = p_path;
+		return;
+	}
 	const char * prepend_header = "\\\\?\\";
 	const char * prepend_header_net = "\\\\?\\UNC\\";
 	if (pfc::strcmp_partial( p_path, prepend_header ) == 0) { out = p_path; return; }
@@ -64,11 +87,14 @@ void pfc::winPrefixPath(pfc::string_base & out, const char * p_path) {
 	}
 };
 
-void pfc::winUnPrefixPath(pfc::string_base & out, const char * p_path) {
+BOOL winFormatSystemErrorMessage(pfc::string_base & p_out, DWORD p_code) {
+	return winFormatSystemErrorMessageHook( p_out, p_code );
+}
+void winUnPrefixPath(pfc::string_base & out, const char * p_path) {
 	const char * prepend_header = "\\\\?\\";
 	const char * prepend_header_net = "\\\\?\\UNC\\";
 	if (pfc::strcmp_partial(p_path, prepend_header_net) == 0) {
-		out = pfc::string_formatter() << "\\\\" << (p_path + strlen(prepend_header_net) );
+		out = PFC_string_formatter() << "\\\\" << (p_path + strlen(prepend_header_net) );
 		return;
 	}
 	if (pfc::strcmp_partial(p_path, prepend_header) == 0) {
@@ -78,26 +104,78 @@ void pfc::winUnPrefixPath(pfc::string_base & out, const char * p_path) {
 	out = p_path;
 }
 
-format_win32_error::format_win32_error(DWORD p_code) {
-	LastErrorRevertScope revert;
-	if (p_code == 0) m_buffer = "Undefined error";
-	else if (!pfc::winFormatSystemErrorMessage(m_buffer,p_code)) m_buffer << "Unknown error code (" << (unsigned)p_code << ")";
+string8 winPrefixPath(const char * in) {
+	string8 temp; winPrefixPath(temp, in); return temp;
+}
+string8 winUnPrefixPath(const char * in) {
+	string8 temp; winUnPrefixPath(temp, in); return temp;
 }
 
-format_hresult::format_hresult(HRESULT p_code) {
-	if (!pfc::winFormatSystemErrorMessage(m_buffer,(DWORD)p_code)) m_buffer = "Unknown error code";
-	stamp_hex(p_code);
-}
-format_hresult::format_hresult(HRESULT p_code, const char * msgOverride) {
-	m_buffer = msgOverride;
-	stamp_hex(p_code);
+} // namespace pfc
+
+pfc::string8 format_win32_error(DWORD p_code) {
+	pfc::LastErrorRevertScope revert;
+	pfc::string8 buffer;
+	if (p_code == 0) buffer = "Undefined error";
+	else if (!pfc::winFormatSystemErrorMessage(buffer,p_code)) buffer << "Unknown error code (" << (unsigned)p_code << ")";
+	return buffer;
 }
 
-void format_hresult::stamp_hex(HRESULT p_code) {
-	m_buffer << " (0x" << pfc::format_hex((t_uint32)p_code, 8) << ")";
+static void format_hresult_stamp_hex(pfc::string8 & buffer, HRESULT p_code) {
+	buffer << " (0x" << pfc::format_hex((t_uint32)p_code, 8) << ")";
 }
+
+pfc::string8 format_hresult(HRESULT p_code) {
+	pfc::string8 buffer;
+	if (!pfc::winFormatSystemErrorMessage(buffer,(DWORD)p_code)) buffer = "Unknown error code";
+	format_hresult_stamp_hex(buffer, p_code);
+	return buffer;
+}
+pfc::string8 format_hresult(HRESULT p_code, const char * msgOverride) {
+	pfc::string8 buffer = msgOverride;
+	format_hresult_stamp_hex(buffer, p_code);
+	return buffer;
+}
+
 
 #ifdef PFC_WINDOWS_DESKTOP_APP
+
+namespace pfc {
+	HWND findOwningPopup(HWND p_wnd)
+	{
+		HWND walk = p_wnd;
+		while (walk != 0 && (GetWindowLong(walk, GWL_STYLE) & WS_CHILD) != 0)
+			walk = GetParent(walk);
+		return walk ? walk : p_wnd;
+	}
+	string8 getWindowClassName(HWND wnd) {
+		TCHAR temp[1024] = {};
+		if (GetClassName(wnd, temp, PFC_TABSIZE(temp)) == 0) {
+			PFC_ASSERT(!"Should not get here");
+			return "";
+		}
+		return pfc::stringcvt::string_utf8_from_os(temp).get_ptr();
+	}
+	void setWindowText(HWND wnd, const char * txt) {
+		SetWindowText(wnd, stringcvt::string_os_from_utf8(txt));
+	}
+	string8 getWindowText(HWND wnd) {
+		PFC_ASSERT(wnd != NULL);
+		int len = GetWindowTextLength(wnd);
+		if (len >= 0)
+		{
+			len++;
+			pfc::array_t<TCHAR> temp;
+			temp.set_size(len);
+			temp[0] = 0;
+			if (GetWindowText(wnd, temp.get_ptr(), len) > 0)
+			{
+				return stringcvt::string_utf8_from_os(temp.get_ptr(), len).get_ptr();
+			}
+		}
+		return "";
+	}
+}
 
 void uAddWindowStyle(HWND p_wnd,LONG p_style) {
 	SetWindowLong(p_wnd,GWL_STYLE, GetWindowLong(p_wnd,GWL_STYLE) | p_style);
@@ -155,7 +233,7 @@ void CClipboardOpenScope::Close() {
 }
 
 
-CGlobalLockScope::CGlobalLockScope(HGLOBAL p_handle) : m_handle(p_handle), m_ptr(GlobalLock(p_handle)) {
+CGlobalLockScope::CGlobalLockScope(HGLOBAL p_handle) : m_ptr(GlobalLock(p_handle)), m_handle(p_handle) {
 	if (m_ptr == NULL) throw std::bad_alloc();
 }
 CGlobalLockScope::~CGlobalLockScope() {
@@ -171,7 +249,13 @@ bool IsPointInsideControl(const POINT& pt, HWND wnd) {
 		walk = GetParent(walk);
 	}
 }
-
+bool IsPopupWindowChildOf(HWND child, HWND parent) {
+	HWND walk = child;
+	while (walk != parent && walk != NULL) {
+		walk = GetParent(walk);
+	}
+	return walk == parent;
+}
 bool IsWindowChildOf(HWND child, HWND parent) {
 	HWND walk = child;
 	while(walk != parent && walk != NULL && (GetWindowLong(walk,GWL_STYLE) & WS_CHILD) != 0) {
@@ -179,7 +263,12 @@ bool IsWindowChildOf(HWND child, HWND parent) {
 	}
 	return walk == parent;
 }
-
+void ResignActiveWindow(HWND wnd) {
+	if (IsPopupWindowChildOf(GetActiveWindow(), wnd)) {
+		HWND parent = GetParent(wnd);
+		if ( parent != NULL ) SetActiveWindow(parent);
+	}
+}
 void win32_menu::release() {
 	if (m_menu != NULL) {
 		DestroyMenu(m_menu);
@@ -227,12 +316,12 @@ bool win32_event::g_wait_for(HANDLE p_event,double p_timeout_seconds) {
 	switch(status) {
 	case WAIT_FAILED:
 		throw exception_win32(GetLastError());
-	default:
-		throw pfc::exception_bug_check();
 	case WAIT_OBJECT_0:
 		return true;
 	case WAIT_TIMEOUT:
 		return false;
+	default:
+		pfc::crash();
 	}
 }
 
@@ -240,6 +329,19 @@ void win32_event::set_state(bool p_state) {
 	PFC_ASSERT(m_handle != NULL);
 	if (p_state) SetEvent(m_handle);
 	else ResetEvent(m_handle);
+}
+
+size_t win32_event::g_multiWait(const HANDLE* events, size_t count, double timeout) {
+	auto status = WaitForMultipleObjects((DWORD)count, events, FALSE, g_calculate_wait_time(timeout));
+	size_t idx = (size_t)(status - WAIT_OBJECT_0);
+	if (idx < count) {
+		return idx;
+	}
+	if (status == WAIT_TIMEOUT) return SIZE_MAX;
+	pfc::crash();
+}
+size_t win32_event::g_multiWait( std::initializer_list<HANDLE> const & arg, double timeout ) {
+    return g_multiWait(arg.begin(), arg.size(), timeout);
 }
 
 int win32_event::g_twoEventWait( HANDLE ev1, HANDLE ev2, double timeout ) {
@@ -309,6 +411,59 @@ namespace pfc {
     bool isAltKeyPressed() {
         return IsKeyPressed(VK_MENU);
     }
+
+	void winSetThreadDescription(HANDLE hThread, const wchar_t * desc) {
+#if _WIN32_WINNT >= 0xA00 
+		SetThreadDescription(hThread, desc);
+#else
+		auto proc = GetProcAddress(GetModuleHandle(L"KernelBase.dll"), "SetThreadDescription");
+		if (proc == nullptr) {
+			proc = GetProcAddress(GetModuleHandle(L"kernel32.dll"), "SetThreadDescription");
+		}
+		if (proc != nullptr) {
+			typedef HRESULT(__stdcall * pSetThreadDescription_t)(HANDLE hThread, PCWSTR lpThreadDescription);
+			auto proc2 = reinterpret_cast<pSetThreadDescription_t>(proc);
+			proc2(hThread, desc);
+		}
+#endif
+	}
+	pfc::string8 format_window(HWND wnd) {
+		pfc::string_formatter ret;
+		ret << "0x" << format_hex( (size_t)wnd );
+		auto title = getWindowText(wnd);
+		if (title.length() > 0) {
+			ret << " [" << title << "]";
+		}
+		return ret;
+	}
+
+#define _(X) {X, #X}
+	struct winStyle_t {
+		DWORD v; const char * n;
+	};
+	static const winStyle_t winStyles[] = {
+		_(WS_POPUP), _(WS_CHILD), _(WS_MINIMIZE), _(WS_VISIBLE),
+		_(WS_DISABLED), _(WS_CLIPSIBLINGS), _(WS_CLIPCHILDREN), _(WS_MAXIMIZE),
+		_(WS_BORDER), _(WS_DLGFRAME), _(WS_VSCROLL), _(WS_HSCROLL),
+		_(WS_SYSMENU), _(WS_THICKFRAME), _(WS_GROUP), _(WS_TABSTOP),
+		_(WS_MINIMIZEBOX), _(WS_MAXIMIZEBOX)
+	};
+
+	pfc::string8 format_windowStyle(DWORD style) {
+		pfc::string_formatter ret;
+		ret << "0x" << format_hex( style, 8 );
+		if (style != 0) {
+			pfc::string_formatter label;
+			for (auto& s : winStyles) if (style & s.v) {
+				if ( label.length() > 0 ) label << "|";
+				label << s.n;
+			}
+			if (label.length() > 0) {
+				ret << " [" << label << "]";
+			}
+		}
+		return ret;
+	}
 }
 
 #else
@@ -327,4 +482,82 @@ namespace pfc {
 
 #endif // #ifdef PFC_WINDOWS_DESKTOP_APP
 
+namespace pfc {
+    void winSleep( double seconds ) {
+        DWORD ms = INFINITE;
+        if (seconds > 0) {
+            ms = rint32(seconds * 1000);
+            if (ms < 1) ms = 1;
+        } else if (seconds == 0) {
+            ms = 0;
+        }
+        Sleep(ms);
+    }
+    void sleepSeconds(double seconds) {
+        winSleep(seconds);
+    }
+    void yield() {
+        Sleep(1);
+    }
+
+	static pfc::string8 winUnicodeNormalize(const char* str, NORM_FORM form) {
+		pfc::string8 ret;
+		if (str != nullptr && *str != 0) {
+			auto w = wideFromUTF8(str);
+			int needed = NormalizeString(form, w, -1, nullptr, 0);
+			if (needed > 0) {
+				pfc::array_t<wchar_t> buf; buf.resize(needed);
+				int status = NormalizeString(form, w, -1, buf.get_ptr(), needed);
+				if (status > 0) {
+					ret = utf8FromWide(buf.get_ptr());
+				}
+			}
+		}
+		return ret;
+	}
+	pfc::string8 unicodeNormalizeD(const char* str) {
+		return winUnicodeNormalize(str, NormalizationD);
+	}
+	pfc::string8 unicodeNormalizeC(const char* str) {
+		return winUnicodeNormalize(str, NormalizationC);
+	}
+	int winNaturalSortCompare(const char* s1, const char* s2) {
+		int ret = winNaturalSortCompareI(s1, s2);
+		if (ret == 0) ret = strcmp(s1, s2);
+		return ret;
+	}
+	int winNaturalSortCompare(const wchar_t* s1, const wchar_t* s2) {
+		int ret = winNaturalSortCompareI(s1, s2);
+		if (ret == 0) ret = wcscmp(s1, s2);
+		return ret;
+	}
+	int winNaturalSortCompareI(const char* s1, const char* s2) {
+		return winNaturalSortCompareI(wideFromUTF8(s1), wideFromUTF8(s2));
+	}
+	int winNaturalSortCompareI(const wchar_t* s1, const wchar_t* s2) {
+		return StrCmpLogicalW(s1, s2);
+	}
+
+#ifndef PFC_SORTSTRING_GENERIC
+	sortString_t makeSortString(const char* in) {
+		auto out = std::make_unique<wchar_t[]>(pfc::stringcvt::estimate_utf8_to_wide(in));
+		pfc::stringcvt::convert_utf8_to_wide_unchecked(out.get(), in);
+		return out;
+	}
+	sortString_t makeSortString(const wchar_t* in) {
+		size_t l = wcslen(in) + 1;
+		auto out = std::make_unique<wchar_t[]>(l+1);
+		memcpy(out.get(), in, sizeof(wchar_t) * l);
+		return out;
+	}
+	int sortStringCompare(sortString_t const& s1, sortString_t const& s2) {
+		return winNaturalSortCompare(s1.get(), s2.get());
+	}
+    int sortStringCompareI(sortString_t const& s1, sortString_t const& s2) {
+        return winNaturalSortCompareI(s1.get(), s2.get());
+    }
 #endif
+}
+
+
+#endif // _WIN32

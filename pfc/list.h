@@ -1,5 +1,57 @@
-#ifndef _PFC_LIST_H_
-#define _PFC_LIST_H_
+#pragma once
+#include "bsearch.h"
+#include "sort.h"
+#include "primitives.h"
+#include "traits.h"
+#include "bit_array.h"
+#include "bit_array_impl.h"
+#include "order_helper.h"
+#include "array.h"
+
+#include <iterator>
+
+namespace pfc {
+	template<typename arr_t>
+	class list_const_iterator {
+		typedef list_const_iterator<arr_t> self_t;
+	public:
+		typedef ptrdiff_t difference_type;
+		typedef typename arr_t::t_item value_type;
+		typedef const value_type* pointer;
+		typedef const value_type& reference;
+		typedef std::random_access_iterator_tag iterator_category;
+
+		list_const_iterator(arr_t* arr, size_t index) : m_arr(arr), m_index(index) {}
+		void operator++() { ++m_index; }
+		void operator--() { --m_index; }
+		value_type operator*() const { return m_arr->get_item(m_index); }
+
+		bool operator==(const self_t& other) const { PFC_ASSERT(m_arr == other.m_arr); return m_index == other.m_index; }
+		bool operator!=(const self_t& other) const { PFC_ASSERT(m_arr == other.m_arr); return m_index != other.m_index; }
+		bool operator>(const self_t& other) const { PFC_ASSERT(m_arr == other.m_arr); return m_index > other.m_index; }
+		bool operator<(const self_t& other) const { PFC_ASSERT(m_arr == other.m_arr); return m_index < other.m_index; }
+		bool operator>=(const self_t& other) const { PFC_ASSERT(m_arr == other.m_arr); return m_index >= other.m_index; }
+		bool operator<=(const self_t& other) const { PFC_ASSERT(m_arr == other.m_arr); return m_index <= other.m_index; }
+
+		void operator+=(size_t v) { m_index += v; }
+		self_t operator+(size_t v) { self_t ret = *this; ret += v; return ret; }
+		difference_type operator-(self_t const& other) const { PFC_ASSERT(m_arr == other.m_arr); return m_index - other.m_index; }
+		void operator-=(size_t v) { m_index -= v; }
+	private:
+		arr_t* m_arr;
+		size_t m_index;
+	};
+}
+
+namespace std {
+	template<typename arr_t> struct iterator_traits< pfc::list_const_iterator<arr_t> > {
+		typedef ptrdiff_t difference_type;
+		typedef typename arr_t::t_item value_type;
+		typedef value_type* pointer;
+		typedef value_type& reference;
+		typedef std::random_access_iterator_tag iterator_category;
+	};
+}
 
 namespace pfc {
 
@@ -12,9 +64,10 @@ public:
 	virtual void get_item_ex(T& p_out, t_size n) const = 0;
 
 	inline t_size get_size() const {return get_count();}
+	inline size_t size() const { return get_count(); }
 
-	inline T get_item(t_size n) const {T temp; get_item_ex(temp,n); return std::move(temp);}
-	inline T operator[](t_size n) const {T temp; get_item_ex(temp,n); return std::move(temp);}
+	inline T get_item(t_size n) const {T temp; get_item_ex(temp,n); return temp;}
+	inline T operator[](t_size n) const {T temp; get_item_ex(temp,n); return temp;}
 
 	template<typename t_compare>
 	t_size find_duplicates_sorted_t(t_compare p_compare,bit_array_var & p_out) const
@@ -77,6 +130,11 @@ public:
 	bool operator==(const t_self & item2) const {return g_equals(*this,item2);}
 	bool operator!=(const t_self & item2) const {return !g_equals(*this,item2);}
 	
+	typedef list_const_iterator< const t_self > iterator;
+	typedef iterator const_iterator;
+
+	iterator begin() const { return iterator(this, 0); }
+	iterator end() const { return iterator(this, get_count()); }
 protected:
 	list_base_const_t() {}
 	~list_base_const_t() {}
@@ -98,6 +156,9 @@ private:
 	const T & m_item;
 	t_size m_count;
 };
+
+template<typename item_t>
+inline list_single_ref_t<item_t> list_single(item_t const& i, size_t n = 1) { return list_single_ref_t<item_t>(i, n); }
 
 template<typename T>
 class list_partial_ref_t : public list_base_const_t<T>
@@ -206,8 +267,8 @@ public:
 	t_size insert_items_fromptr(const T* source,t_size num,t_size base) {return insert_items(list_const_ptr_t<T>(source,num),base);}
 	inline t_size add_items_fromptr(const T* source,t_size num) {return insert_items_fromptr(source,num,~0);}
 
-	inline t_size add_items(const list_base_const_t<T> & items) {return insert_items(items,~0);}
-	inline t_size add_item(const T& item) {return insert_item(item,~0);}
+	inline t_size add_items(const list_base_const_t<T> & items) {return insert_items(items,SIZE_MAX);}
+	inline t_size add_item(const T& item) {return insert_item(item,SIZE_MAX);}
 
 	inline void remove_mask(const bit_array & mask) {filter_mask(bit_array_not(mask));}
 	inline void remove_all() {filter_mask(bit_array_false());}
@@ -233,9 +294,9 @@ public:
 		int compare(const T& p_item1,const T& p_item2) {return ::pfc::compare_t(p_item1,p_item2);}
 	};
 
-	void sort() {sort(sort_callback_auto());}
-	template<typename t_compare> void sort_t(t_compare p_compare) {sort(sort_callback_impl_t<t_compare>(p_compare));}
-	template<typename t_compare> void sort_stable_t(t_compare p_compare) {sort_stable(sort_callback_impl_t<t_compare>(p_compare));}
+	void sort() {sort_callback_auto cb;sort(cb);}
+	template<typename t_compare> void sort_t(t_compare p_compare) {sort_callback_impl_t<t_compare> cb(p_compare);sort(cb);}
+	template<typename t_compare> void sort_stable_t(t_compare p_compare) {sort_callback_impl_t<t_compare> cb(p_compare); sort_stable(cb);}
 
 	template<typename t_compare> void sort_remove_duplicates_t(t_compare p_compare)
 	{
@@ -310,6 +371,9 @@ public:
 	list_impl_t() {}
 	list_impl_t(const t_self & p_source) { add_items(p_source); }
 
+	void copy(const t_self& p_source) { m_buffer = p_source.m_buffer; }
+	void move(t_self& p_source) { m_buffer = std::move(p_source.m_buffer); }
+
 	void prealloc(t_size count) {m_buffer.prealloc(count);}
 
 	void set_count(t_size p_count) {m_buffer.set_size(p_count);}
@@ -330,11 +394,11 @@ public:
 
 	T remove_by_idx(t_size idx)
 	{
-		T ret = m_buffer[idx];
+		T ret = std::move(m_buffer[idx]);
 		t_size n;
 		t_size max = m_buffer.get_size();
 		for(n=idx+1;n<max;n++) {
-			::pfc::move_t(m_buffer[n-1],m_buffer[n]);
+			m_buffer[n - 1] = std::move(m_buffer[n]);
 		}
 		m_buffer.set_size(max-1);
 		return ret;
@@ -364,6 +428,7 @@ public:
 
 	inline t_size get_count() const {return m_buffer.get_size();}
 	inline t_size get_size() const {return m_buffer.get_size();}
+	inline size_t size() const { return m_buffer.get_size(); }
 
 	inline const T & operator[](t_size n) const
 	{
@@ -425,9 +490,9 @@ public:
 
 	void get_items_mask(list_impl_t<T,t_storage> & out,const bit_array & mask)
 	{
-		t_size n,count = get_size();
-		for_each_bit_array(n,mask,true,0,count)
+		mask.walk( get_size(), [&] (size_t n) {
 			out.add_item(m_buffer[n]);
+		} );
 	}
 
 	void filter_mask(const bit_array & mask)
@@ -494,6 +559,11 @@ public:
 		m_buffer = std::move(other.m_buffer);
 	}
 
+	T* begin() { return m_buffer.get_ptr(); }
+	T* end() { return m_buffer.get_ptr() + get_size(); }
+	const T* begin() const { return m_buffer.get_ptr(); }
+	const T* end() const { return m_buffer.get_ptr() + get_size(); }
+
 private:
 	class sort_callback_wrapper
 	{
@@ -519,12 +589,16 @@ public:
 	void remove_mask(const bool * mask) {remove_mask(bit_array_table(mask,get_size()));}
 	void filter_mask(const bool * mask) {filter_mask(bit_array_table(mask,get_size()));}
 
-	t_size add_item(const T& item) {
-		return insert_item(item, ~0);
+	size_t add_item(const T& item) {
+		return pfc::append_t(m_buffer, item);
+	}
+
+	size_t add_item(T&& item) {
+		return pfc::append_t(m_buffer, std::move(item));
 	}
 
 	template<typename t_in> t_size add_item(const t_in & item) {
-		return insert_item(item, ~0);
+		return pfc::append_t(m_buffer, item);
 	}
 
 	void remove_all() {remove_mask(bit_array_true());}
@@ -579,9 +653,16 @@ template<typename t_item, template<typename> class t_alloc = alloc_fast >
 class list_t : public list_impl_t<t_item,array_t<t_item,t_alloc> > {
 public:
     typedef list_t<t_item, t_alloc> t_self;
-	template<typename t_in> t_self & operator=(t_in const & source) {this->remove_all(); this->add_items(source); return *this;}
-	template<typename t_in> t_self & operator+=(t_in const & p_source) {this->add_item(p_source); return *this;}
-	template<typename t_in> t_self & operator|=(t_in const & p_source) {this->add_items(p_source); return *this;}
+	template<typename t_in> const t_self & operator=(t_in const & source) {this->remove_all(); this->add_items(source); return *this;}
+	template<typename t_in> const t_self & operator+=(t_in const & p_source) {this->add_item(p_source); return *this;}
+	template<typename t_in> const t_self & operator|=(t_in const & p_source) {this->add_items(p_source); return *this;}
+
+	const t_self& operator=(t_self const& other) { this->copy(other); return *this; }
+	const t_self& operator=(t_self&& other) { this->move(other); return *this; }
+
+	list_t() {}
+	list_t(t_self const& other) { this->copy(other); }
+	list_t(t_self&& other) { this->move(other); }
 };
 
 template<typename t_item, t_size p_fixed_count, template<typename> class t_alloc = alloc_fast >
@@ -639,4 +720,3 @@ private:
 template<typename item, template<typename> class alloc> class traits_t<list_t<item, alloc> > : public combine_traits<traits_t<alloc<item> >, traits_vtable> {};
 
 }
-#endif //_PFC_LIST_H_

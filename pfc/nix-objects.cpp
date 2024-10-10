@@ -1,4 +1,5 @@
-#include "pfc.h"
+#include "pfc-lite.h"
+
 
 #ifndef _WIN32
 #include <stdio.h>
@@ -6,10 +7,18 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <poll.h>
+#include <math.h>
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
+
+#include "nix-objects.h"
+#include "string_base.h"
+#include "array.h"
+#include "debug.h"
+#include "timers.h"
+#include "filehandle.h"
 
 namespace pfc {
     void nixFormatError( string_base & str, int code ) {
@@ -57,6 +66,7 @@ namespace pfc {
         _init(code);
     }
     void exception_nix::_init(int code) {
+        PFC_ASSERT( code != EINTR );
         m_code = code;
         nixFormatError(m_msg, code);
     }
@@ -115,15 +125,36 @@ namespace pfc {
         pfc::array_t< pollfd > v;
         v.set_size_discard( count );
         size_t walk = 0;
-        for( auto i = total.m_fds.begin(); i != total.m_fds.end(); ++ i ) {
-            const int fd = *i;
+        for( auto fd : total.m_fds) {
             auto & f = v[walk++];
             f.fd = fd;
             f.events = (Reads[fd] ? POLLIN : 0) | (Writes[fd] ? POLLOUT : 0);
+            // POLLERR ignored in events, only used in revents
             f.revents = 0;
         }
-        int status = poll(v.get_ptr(), (int)count, timeOutMS);
-        if (status < 0) throw exception_nix();
+        hires_timer timer;
+        int countdown = timeOutMS;
+        if (countdown > 0) timer.start();
+        int status;
+        for ( ;; ) {
+            status = poll(v.get_ptr(), (int)count, countdown);
+            if (status >= 0) break;
+
+            int e = errno;
+            if (e == EINTR) {
+                if (countdown < 0) continue; // infinite
+                if (countdown > 0) {
+                    countdown = timeOutMS - rint32( timer.query() );
+                    if (countdown > 0) continue;
+                }
+                // should not really get here
+                status = 0;
+                break;
+            } else {
+                throw exception_nix(e);
+            }
+            
+        }
         
         Reads.clear(); Writes.clear(); Errors.clear();
         
@@ -131,22 +162,50 @@ namespace pfc {
             for(walk = 0; walk < count; ++walk) {
                 auto & f = v[walk];
                 if (f.revents & POLLIN) Reads += f.fd;
-                if (f.events & POLLOUT) Writes += f.fd;
-                if (f.events & POLLERR) Errors += f.fd;
+                if (f.revents & POLLOUT) Writes += f.fd;
+                if (f.revents & POLLERR) Errors += f.fd;
             }
+            PFC_ASSERT( !Reads.m_fds.empty() || !Writes.m_fds.empty() || !Errors.m_fds.empty() );
         }
         
         return status;
     }
     
-    bool fdCanRead( int fd ) {
-        return fdWaitRead( fd, 0 );
+    inline bool fdCanRead_select( int fdRead ) {
+        PFC_ASSERT( fdRead < FD_SETSIZE );
+        timeval tv = {};
+        fd_set set;
+        FD_ZERO(&set);
+        FD_SET(fdRead, &set);
+        
+        return select(fdRead + 1, &set, nullptr, nullptr, &tv) > 0;
     }
+    inline bool fdCanRead_poll(int fdRead) {
+        pollfd arg = {fdRead, POLLIN };
+        poll(&arg, 1, 0);
+        return (arg.revents & POLLIN) != 0;
+    }
+
+    bool fdCanRead( int fdRead ) {
+        if ( fdRead < 0 ) {
+            PFC_ASSERT( !"???" );
+            return false;
+        }
+    #ifdef __APPLE__
+        // BROKEN extremely inefficient implementation of poll() on Apple systems, avoid if possible
+        if ( fdRead < FD_SETSIZE ) {
+            return fdCanRead_select( fdRead );
+        }
+    #endif
+        return fdCanRead_poll(fdRead);
+    }
+
     bool fdCanWrite( int fd ) {
         return fdWaitWrite( fd, 0 );
     }
     
     bool fdWaitRead( int fd, double timeOutSeconds ) {
+        if ( timeOutSeconds == 0 ) return fdCanRead( fd );
         fdSelect sel; sel.Reads += fd;
         return sel.Select( timeOutSeconds ) > 0;
     }
@@ -155,10 +214,11 @@ namespace pfc {
         return sel.Select( timeOutSeconds ) > 0;
     }
     
-    nix_event::nix_event() {
+    nix_event::nix_event(bool state) {
         createPipe( m_fd );
         setNonBlocking( m_fd[0] );
         setNonBlocking( m_fd[1] );
+        if ( state ) set_state(true);
     }
     nix_event::~nix_event() {
         close( m_fd[0] );
@@ -184,8 +244,28 @@ namespace pfc {
     bool nix_event::wait_for( double p_timeout_seconds ) {
         return fdWaitRead( m_fd[0], p_timeout_seconds );
     }
+    bool nix_event::is_set() {
+        return fdCanRead(m_fd[0]);
+    }
     bool nix_event::g_wait_for( int p_event, double p_timeout_seconds ) {
         return fdWaitRead( p_event, p_timeout_seconds );
+    }
+    size_t nix_event::g_multiWait( const pfc::eventHandle_t * events, size_t count, double timeout ) {
+        fdSelect sel;
+        for( size_t i = 0; i < count; ++ i ) {
+            sel.Reads += events[i];
+        }
+        int state = sel.Select( timeout );
+        if (state < 0) throw exception_nix();
+        if (state == 0) return SIZE_MAX;
+        for( size_t i = 0; i < count; ++ i ) {
+            if ( sel.Reads[ events[i] ] ) return i;
+        }
+        crash(); // should not get here
+        return SIZE_MAX;
+    }
+    size_t nix_event::g_multiWait(std::initializer_list<eventHandle_t> const & arg, double timeout) {
+        return g_multiWait(arg.begin(), arg.size(), timeout);
     }
     int nix_event::g_twoEventWait( int h1, int h2, double timeout ) {
         fdSelect sel;
@@ -206,11 +286,21 @@ namespace pfc {
     void nixSleep(double seconds) {
         fdSelect sel; sel.Select( seconds );
     }
+    void sleepSeconds(double seconds) {
+        return nixSleep(seconds);
+    }
+    
+    void yield() {
+        return nixSleep(0.001);
+    }
 
     double nixGetTime() {
         timeval tv = {};
         gettimeofday(&tv, NULL);
         return importTimeval(tv);
+    }
+    tickcount_t getTickCount() {
+        return rint64(nixGetTime() * 1000.f);
     }
     
     bool nixReadSymLink( string_base & strOut, const char * path ) {
@@ -240,14 +330,16 @@ namespace pfc {
 #endif
     }
 
+    static int openDevRand() {
+        int ret = open("/dev/urandom", O_RDONLY);
+        if ( ret < 0 ) throw exception_nix();
+        return ret;
+    }
     void nixGetRandomData( void * outPtr, size_t outBytes ) {
 		try {
-			fileHandle randomData;
-			randomData = open("/dev/urandom", O_RDONLY);
-			if (randomData.h < 0) throw exception_nix();
+            static fileHandle randomData = openDevRand();
 			if (read(randomData.h, outPtr, outBytes) != outBytes) throw exception_nix();
-		}
-		catch (std::exception const & e) {
+		} catch (std::exception const & e) {
 			throw std::runtime_error("getRandomData failure");
 		}
     }

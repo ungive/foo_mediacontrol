@@ -1,5 +1,6 @@
-#ifndef _PFC_STRING_LIST_H_
-#define _PFC_STRING_LIST_H_
+#pragma once
+
+#include "list.h"
 
 namespace pfc {
 
@@ -24,6 +25,9 @@ namespace pfc {
 		template<typename t_what> string_list_impl & operator|=(const string_list_impl & p_source) {_append(p_source); return *this;}
 		template<typename t_what> string_list_impl & operator+=(const t_what & p_source) {pfc::append_t(m_data, p_source); return *this;}
 
+		void set_item(size_t idx, const char* str) { m_data[idx] = str; }
+
+		void remove_mask(bit_array const& mask) { pfc::remove_mask_t(m_data, mask); }
 	private:
 		template<typename t_what> void _append(const t_what & p_source) {
 			const t_size toadd = p_source.get_size(), base = m_data.get_size();
@@ -40,5 +44,3 @@ namespace pfc {
 		pfc::array_t<pfc::string8,pfc::alloc_fast> m_data;
 	};
 }
-
-#endif //_PFC_STRING_LIST_H_

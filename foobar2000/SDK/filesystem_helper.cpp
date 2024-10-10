@@ -1,4 +1,5 @@
-#include "foobar2000.h"
+#include "foobar2000-sdk-pch.h"
+#include "filesystem_helper.h"
 
 void stream_writer_chunk::write(const void * p_buffer,t_size p_bytes,abort_callback & p_abort) {
 	t_size remaining = p_bytes, written = 0;
@@ -85,26 +86,6 @@ void stream_reader_chunk::flush(abort_callback & p_abort) {
 void stream_reader_chunk::g_skip(stream_reader * p_stream,abort_callback & p_abort) {
 	stream_reader_chunk(p_stream).flush(p_abort);
 }
-
-t_size reader_membuffer_base::read(void * p_buffer,t_size p_bytes,abort_callback & p_abort) {
-	p_abort.check_e();
-	t_size max = get_buffer_size();
-	if (max < m_offset) uBugCheck();
-	max -= m_offset;
-	t_size delta = p_bytes;
-	if (delta > max) delta = max;
-	memcpy(p_buffer,(char*)get_buffer() + m_offset,delta);
-	m_offset += delta;
-	return delta;
-}
-
-void reader_membuffer_base::seek(t_filesize position,abort_callback & p_abort) {
-	p_abort.check_e();
-	t_filesize max = get_buffer_size();
-	if (position == filesize_invalid || position > max) throw exception_io_seek_out_of_range();
-	m_offset = (t_size)position;
-}
-
 
 
 
@@ -202,21 +183,116 @@ bool fb2kFileSelfTest(file::ptr f, abort_callback & aborter) {
 }
 
 
-
-namespace {
-    class listDirectoryCallback : public directory_callback {
-    public:
-        bool on_entry(filesystem * p_owner,abort_callback & p_abort,const char * p_url,bool p_is_subdirectory,const t_filestats & p_stats) {
-            m_func( p_url, p_stats, p_is_subdirectory );
-            return true;
-        }
-        listDirectoryFunc_t m_func;
-    };
-
-}
 namespace foobar2000_io {
+	void retryFileDelete(double timeout, abort_callback & a, std::function<void()> f) {
+		FB2K_RETRY_ON_EXCEPTION3(f(), a, timeout, exception_io_sharing_violation, exception_io_denied, exception_io_directory_not_empty);
+	}
+	void retryFileMove(double timeout, abort_callback & a, std::function<void() > f) {
+		FB2K_RETRY_FILE_MOVE( f(), a, timeout );
+	}
+	void retryOnSharingViolation(double timeout, abort_callback & a, std::function<void() > f) {
+		FB2K_RETRY_ON_SHARING_VIOLATION(f(), a, timeout);
+	}
+	void retryOnSharingViolation(std::function<void() > f, double timeout, abort_callback & a) {
+		FB2K_RETRY_ON_SHARING_VIOLATION( f(), a, timeout );
+	}
     void listDirectory( const char * path, abort_callback & aborter, listDirectoryFunc_t func) {
-        listDirectoryCallback cb; cb.m_func = func;
+		listDirectoryCallbackImpl cb; cb.m_func = func;
         filesystem::g_list_directory(path, cb, aborter);
     }
+
+    pfc::string8 stripParentFolders( const char * inPath ) {
+        PFC_ASSERT( strstr(inPath, "://" ) == nullptr || matchProtocol( inPath, "file" ) );
+
+        size_t prefixLen = pfc::string_find_first(inPath, "://");
+        if ( prefixLen != pfc_infinite ) prefixLen += 3;
+        else prefixLen = 0;
+
+        pfc::chain_list_v2_t<pfc::string_part_ref> segments;
+
+        const char separator =
+    #ifdef _WIN32
+            '\\'
+    #else
+            '/'
+    #endif
+            ;
+        const char strSeparator[] = {separator, 0};
+
+        pfc::splitStringByChar(segments, inPath + prefixLen, separator );
+        for ( auto i = segments.first(); i.is_valid(); ) {
+            auto n = i; ++n;
+            if ( i->equals( "." ) ) {
+                segments.remove_single( i );
+            } else if ( i->equals( ".." ) ) {
+                auto p = i; --p;
+                if ( p.is_valid() ) segments.remove_single( p );
+                segments.remove_single( i );
+            }
+            i = n;
+        }
+        pfc::string8 ret;
+        if ( prefixLen > 0 ) ret.add_string( inPath, prefixLen );
+        bool bFirst = true;
+        for ( auto i = segments.first(); i.is_valid(); ++ i ) {
+            if (!bFirst) ret << strSeparator;
+            ret << *i;
+            bFirst = false;
+        }
+        return ret;
+    }
+#ifdef _WIN32
+	pfc::string8 winGetVolumePath(const char * fb2kPath) {
+		PFC_ASSERT(matchProtocol(fb2kPath, "file"));
+		pfc::string8 native;
+		if (!filesystem::g_get_native_path(fb2kPath, native)) throw pfc::exception_invalid_params();
+
+		TCHAR outBuffer[MAX_PATH+1] = {};
+		WIN32_IO_OP( GetVolumePathName( pfc::stringcvt::string_os_from_utf8( native ), outBuffer, MAX_PATH ) );
+		return pfc::stringcvt::string_utf8_from_os( outBuffer ).get_ptr();
+	}
+
+	DWORD winVolumeFlags( const char * fb2kPath ) {
+		PFC_ASSERT(matchProtocol(fb2kPath, "file"));
+		pfc::string8 native;
+		if (!filesystem::g_get_native_path(fb2kPath, native)) throw pfc::exception_invalid_params();
+
+		TCHAR outBuffer[MAX_PATH + 1] = {};
+		WIN32_IO_OP(GetVolumePathName(pfc::stringcvt::string_os_from_utf8(native), outBuffer, MAX_PATH));
+
+		DWORD flags = 0;
+		WIN32_IO_OP(GetVolumeInformation(outBuffer, nullptr, 0, nullptr, nullptr, &flags, nullptr, 0));
+		return flags;
+	}
+#endif
+}
+
+pfc::string8 file_path_canonical(const char* src) {
+	pfc::string8 ret;
+	filesystem::g_get_canonical_path(src, ret);
+	return ret;
+}
+
+pfc::string8 file_path_display(const char* src) {
+	pfc::string8 ret;
+	filesystem::g_get_display_path(src, ret);
+	return ret;
+}
+
+pfc::string8 fb2k::filename_ext( const char * path, filesystem::ptr & fs) {
+    if ( fs.is_empty() || ! fs->is_our_path( path ) ) {
+        fs = filesystem::tryGet( path );
+    }
+    if ( fs.is_valid() ) return fs->extract_filename_ext( path );
+    // UGLY FALLBACK
+    return pfc::string_filename_ext( path );
+
+}
+pfc::string8 fb2k::filename_ext( const char * path ) {
+    filesystem::ptr no_reuse;
+    return filename_ext( path, no_reuse );
+}
+
+pfc::string8 fb2k::filename( const char * path ) {
+    return pfc::remove_ext_v2( filename_ext( path ) );
 }

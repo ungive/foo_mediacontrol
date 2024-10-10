@@ -1,46 +1,44 @@
-#include "stdafx.h"
+#include "StdAfx.h"
+#include "cue_creator.h"
+#include "../SDK/chapterizer.h"
 
-
-namespace {
-
-	class format_meta
-	{
-	public:
-		format_meta(const file_info & p_source,const char * p_name,bool p_allow_space = true)
-		{
-			p_source.meta_format(p_name,m_buffer);
-			m_buffer.replace_byte('\"','\'');
-			uReplaceString(m_buffer,pfc::string8(m_buffer),pfc_infinite,"\x0d\x0a",2,"\\",1,false);
-			if (!p_allow_space) m_buffer.replace_byte(' ','_');
-			m_buffer.replace_nontext_chars();
-		}
-		inline operator const char*() const {return m_buffer;}
-	private:
-		pfc::string8_fastalloc m_buffer;
-	};
+static pfc::string8 format_meta(const file_info& p_source, const char* p_name, bool p_allow_space = true) {
+	pfc::string8 temp, ret;
+	p_source.meta_format(p_name, temp);
+	temp.replace_byte('\"', '\'');
+	uReplaceString(ret, temp, pfc_infinite, "\x0d\x0a", 2, "\\", 1, false);
+	if (!p_allow_space) ret.replace_byte(' ', '_');
+	ret.replace_nontext_chars();
+	return ret;
 }
 
 static bool is_meta_same_everywhere(const cue_creator::t_entry_list & p_list,const char * p_meta)
 {
 	pfc::string8_fastalloc reference,temp;
 
-	cue_creator::t_entry_list::const_iterator iter;
-	iter = p_list.first();
-	if (!iter.is_valid()) return false;
-	if (!iter->m_infos.meta_format(p_meta,reference)) return false;
-	for(;iter.is_valid();++iter)
-	{
-		if (!iter->m_infos.meta_format(p_meta,temp)) return false;
-		if (strcmp(temp,reference)!=0) return false;
+	bool first = true;
+	for(auto & iter : p_list) {
+		if ( ! iter.isTrackAudio() ) continue;
+
+		if ( first ) {
+			first = false;
+			if (!iter.m_infos.meta_format(p_meta,reference)) return false;
+		} else {
+			if (!iter.m_infos.meta_format(p_meta,temp)) return false;
+			if (strcmp(temp,reference)!=0) return false;
+		}
 	}
+
 	return true;
 }
 
-static const char g_eol[] = "\r\n";
-
+#define g_eol "\r\n"
 
 namespace cue_creator
 {
+	pfc::string_formatter create(const t_entry_list& p_list) {
+		pfc::string_formatter ret; create(ret, p_list); return ret;
+	}
 	void create(pfc::string_formatter & p_out,const t_entry_list & p_data)
 	{
 		if (p_data.get_count() == 0) return;
@@ -54,46 +52,59 @@ namespace cue_creator
 			catalog_global =		is_meta_same_everywhere(p_data,"catalog"),
 			songwriter_global =		is_meta_same_everywhere(p_data,"songwriter");
 
-		if (genre_global) {
-			p_out << "REM GENRE " << format_meta(p_data.first()->m_infos,"genre") << g_eol;
-		}
-		if (date_global) {
-			p_out << "REM DATE " << format_meta(p_data.first()->m_infos,"date") << g_eol;
-		}
-		if (discid_global) {
-			p_out << "REM DISCID " << format_meta(p_data.first()->m_infos,"discid") << g_eol;
-		}
-		if (comment_global) {
-			p_out << "REM COMMENT " << format_meta(p_data.first()->m_infos,"comment") << g_eol;
-		}
-		if (catalog_global) {
-			p_out << "CATALOG " << format_meta(p_data.first()->m_infos,"catalog") << g_eol;
-		}
-		if (songwriter_global) {
-			p_out << "SONGWRITER \"" << format_meta(p_data.first()->m_infos,"songwriter") << "\"" << g_eol;
-		}
+		{
+			auto firstTrack = p_data.first();
+			while( firstTrack.is_valid() && ! firstTrack->isTrackAudio() ) ++ firstTrack;
+			if ( firstTrack.is_valid() ) {
+				if (genre_global) {
+					p_out << "REM GENRE " << format_meta(firstTrack->m_infos,"genre") << g_eol;
+				}
+				if (date_global) {
+					p_out << "REM DATE " << format_meta(firstTrack->m_infos,"date") << g_eol;
+				}
+				if (discid_global) {
+					p_out << "REM DISCID " << format_meta(firstTrack->m_infos,"discid") << g_eol;
+				}
+				if (comment_global) {
+					p_out << "REM COMMENT " << format_meta(firstTrack->m_infos,"comment") << g_eol;
+				}
+				if (is_meta_same_everywhere(p_data, "discnumber")) {
+					p_out << "REM DISCNUMBER " << format_meta(firstTrack->m_infos, "discnumber") << g_eol;
+				}
+				if (is_meta_same_everywhere(p_data, "totaldiscs")) {
+					p_out << "REM TOTALDISCS " << format_meta(firstTrack->m_infos, "totaldiscs") << g_eol;
+				}
+				if (catalog_global) {
+					p_out << "CATALOG " << format_meta(firstTrack->m_infos,"catalog") << g_eol;
+				}
+				if (songwriter_global) {
+					p_out << "SONGWRITER \"" << format_meta(firstTrack->m_infos,"songwriter") << "\"" << g_eol;
+				}
 
-		if (album_artist_global)
-		{
-			p_out << "PERFORMER \"" << format_meta(p_data.first()->m_infos,"album artist") << "\"" << g_eol;
-			artist_global = false;
-		}
-		else if (artist_global)
-		{
-			p_out << "PERFORMER \"" << format_meta(p_data.first()->m_infos,"artist") << "\"" << g_eol;
-		}
-		if (album_global)
-		{
-			p_out << "TITLE \"" << format_meta(p_data.first()->m_infos,"album") << "\"" << g_eol;
-		}
+				if (album_artist_global)
+				{
+					p_out << "PERFORMER \"" << format_meta(firstTrack->m_infos,"album artist") << "\"" << g_eol;
+					artist_global = false;
+				}
+				else if (artist_global)
+				{
+					p_out << "PERFORMER \"" << format_meta(firstTrack->m_infos,"artist") << "\"" << g_eol;
+				}
+				if (album_global)
+				{
+					p_out << "TITLE \"" << format_meta(firstTrack->m_infos,"album") << "\"" << g_eol;
+				}
 
-		{
-			replaygain_info::t_text_buffer rgbuffer;
-			replaygain_info rg = p_data.first()->m_infos.get_replaygain();
-			if (rg.format_album_gain(rgbuffer))
-				p_out << "REM REPLAYGAIN_ALBUM_GAIN " << rgbuffer << g_eol;
-			if (rg.format_album_peak(rgbuffer))
-				p_out << "REM REPLAYGAIN_ALBUM_PEAK " << rgbuffer << g_eol;			
+				{
+					replaygain_info::t_text_buffer rgbuffer;
+					replaygain_info rg = firstTrack->m_infos.get_replaygain();
+					if (rg.format_album_gain(rgbuffer))
+						p_out << "REM REPLAYGAIN_ALBUM_GAIN " << rgbuffer << g_eol;
+					if (rg.format_album_peak(rgbuffer))
+						p_out << "REM REPLAYGAIN_ALBUM_PEAK " << rgbuffer << g_eol;			
+				}
+
+			}
 		}
 
 		pfc::string8 last_file;
@@ -102,17 +113,30 @@ namespace cue_creator
 		{
 			if (strcmp(last_file,iter->m_file) != 0)
 			{
-				p_out << "FILE \"" << iter->m_file << "\" WAVE" << g_eol;
+				auto fileType = iter->m_fileType;
+				if ( fileType.length() == 0 ) fileType = "WAVE";
+				p_out << "FILE \"" << iter->m_file << "\" " << fileType << g_eol;
 				last_file = iter->m_file;
 			}
 
-			p_out << "  TRACK " << pfc::format_int(iter->m_track_number,2) << " AUDIO" << g_eol;
+			{
+				auto trackType = iter->m_trackType;
+				if (trackType.length() == 0) trackType = "AUDIO";
+				p_out << "  TRACK " << pfc::format_int(iter->m_track_number,2) << " " << trackType << g_eol;
+			}
+
+			
 
 			if (iter->m_infos.meta_find("title") != pfc_infinite)
 				p_out << "    TITLE \"" << format_meta(iter->m_infos,"title") << "\"" << g_eol;
 			
-			if (!artist_global && iter->m_infos.meta_find("artist") != pfc_infinite)
+			const bool bHaveArtist = iter->m_infos.meta_exists("artist");
+			if (!artist_global && bHaveArtist) {
 				p_out << "    PERFORMER \"" << format_meta(iter->m_infos,"artist") << "\"" << g_eol;
+			} else if (album_artist_global && !bHaveArtist) {
+				// special case: album artist set, track artist not set
+				p_out << "    PERFORMER \"\"" << g_eol;
+			}
 
 			if (!songwriter_global && iter->m_infos.meta_find("songwriter") != pfc_infinite) {
 				p_out << "    SONGWRITER \"" << format_meta(iter->m_infos,"songwriter") << "\"" << g_eol;
@@ -125,7 +149,9 @@ namespace cue_creator
 			if (!date_global && iter->m_infos.meta_find("date") != pfc_infinite) {
 				p_out << "    REM DATE " << format_meta(iter->m_infos,"date") << g_eol;
 			}
-
+			if (!comment_global && iter->m_infos.meta_exists("comment")) {
+				p_out << "    REM COMMENT " << format_meta(iter->m_infos, "comment") << g_eol;
+			}
 
 
 			{
@@ -173,5 +199,11 @@ namespace cue_creator
 		m_index_list.m_positions[1] = index1;
 	}
 
+	bool t_entry::isTrackAudio() const { 
+		PFC_ASSERT( m_trackType.length() > 0 );
+		return pfc::stringEqualsI_ascii( m_trackType, "AUDIO" ); 
+	}
 }
+
+
 

@@ -1,26 +1,17 @@
-#ifndef _PFC_GUID_H_
-#define _PFC_GUID_H_
+#pragma once
+
+#include "primitives.h"
 
 namespace pfc {
 
 	GUID GUID_from_text(const char * text);
-
-	class print_guid
-	{
-	public:
-		print_guid(const GUID & p_guid);
-		inline operator const char * () const {return m_data;}
-		inline const char * get_ptr() {return m_data;}
-	private:
-		char m_data[64];
-	};
 
 	inline int guid_compare(const GUID & g1,const GUID & g2) {return memcmp(&g1,&g2,sizeof(GUID));}
 
 	inline bool guid_equal(const GUID & g1,const GUID & g2) {return (g1 == g2) ? true : false;}
 	template<> inline int compare_t<GUID,GUID>(const GUID & p_item1,const GUID & p_item2) {return guid_compare(p_item1,p_item2);}
 
-	extern const GUID guid_null;
+	static constexpr GUID guid_null = {};
 
 	void print_hex_raw(const void * buffer,unsigned bytes,char * p_out);
 
@@ -31,20 +22,15 @@ namespace pfc {
 	inline GUID xorGUID(const GUID & v1, const GUID & v2) {
 		GUID temp; memxor(&temp, &v1, &v2, sizeof(GUID)); return temp;
 	}
-
-	class format_guid_cpp : public pfc::string_formatter {
-	public:
-		format_guid_cpp(const GUID & guid) {
-			*this << "{0x" << pfc::format_hex(guid.Data1,8) << ", 0x" << pfc::format_hex(guid.Data2, 4) << ", 0x" << pfc::format_hex(guid.Data3,4) << ", {0x" << pfc::format_hex(guid.Data4[0],2);
-			for(int n = 1; n < 8; ++n) {
-				*this << ", 0x" << pfc::format_hex(guid.Data4[n],2);
-			}
-			*this << "}}";
-		}
-	};
     
+    string8 format_guid_cpp( const GUID & );
+    string8 print_guid( const GUID & );
+
     GUID createGUID();
+	uint64_t halveGUID( const GUID & );
+    
+    struct predicateGUID {
+        inline bool operator() ( const GUID & v1, const GUID & v2 ) const {return guid_compare(v1, v2) > 0;}
+    };
+
 }
-
-
-#endif

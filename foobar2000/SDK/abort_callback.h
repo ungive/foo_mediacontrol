@@ -1,5 +1,4 @@
-#ifndef _foobar2000_sdk_abort_callback_h_
-#define _foobar2000_sdk_abort_callback_h_
+#pragma once
 
 namespace foobar2000_io {
 
@@ -40,8 +39,20 @@ public:
 	//! Sleeps p_timeout_seconds or less when aborted, returns true when execution should continue, false when not.
 	bool sleep_ex(double p_timeout_seconds) const;
     
+	//! Waits for an event. Returns true if event is now signaled, false if the specified period has elapsed and the event did not become signaled. \n
+	//! Throws exception_aborted if aborted.
     bool waitForEvent( pfc::eventHandle_t evtHandle, double timeOut );
-    bool waitForEvent( pfc::event & evt, double timeOut ) {return waitForEvent( evt.get_handle(), timeOut ); }
+	//! Waits for an event. Returns true if event is now signaled, false if the specified period has elapsed and the event did not become signaled. \n
+	//! Throws exception_aborted if aborted.
+	bool waitForEvent(pfc::event& evt, double timeOut);
+
+	//! Waits for an event. Returns once the event became signaled; throw exception_aborted if abort occurred first.
+	void waitForEvent(pfc::eventHandle_t evtHandle);
+	//! Waits for an event. Returns once the event became signaled; throw exception_aborted if abort occurred first.
+	void waitForEvent(pfc::event& evt);
+
+	abort_callback( const abort_callback & ) = delete;
+	void operator=( const abort_callback & ) = delete;
 protected:
 	abort_callback() {}
 	~abort_callback() {}
@@ -49,44 +60,60 @@ protected:
 
 
 
-//! Implementation of abort_callback interface.
+//! Standard implementation of abort_callback interface.
 class abort_callback_impl : public abort_callback {
 public:
-	abort_callback_impl() : m_aborting(false) {}
+	abort_callback_impl() {}
 	inline void abort() {set_state(true);}
 	inline void set() {set_state(true);}
 	inline void reset() {set_state(false);}
 
 	void set_state(bool p_state) {m_aborting = p_state; m_event.set_state(p_state);}
 
-	bool is_aborting() const {return m_aborting;}
+	bool is_aborting() const override {return m_aborting;}
 
-	abort_callback_event get_abort_event() const {return m_event.get_handle();}
+	abort_callback_event get_abort_event() const override {return m_event.get_handle();}
 
 private:
-	abort_callback_impl(const abort_callback_impl &);
-	const abort_callback_impl & operator=(const abort_callback_impl&);
+	abort_callback_impl(const abort_callback_impl &) = delete;
+	const abort_callback_impl & operator=(const abort_callback_impl&) = delete;
 	
-	volatile bool m_aborting;
+	volatile bool m_aborting = false;
 	pfc::event m_event;
 };
 
-#ifdef _WIN32
+//! Alternate abort_callback implementation, supply your own event handle to signal abort. \n
+//! Slightly less efficient (is_aborting() polls the event instead of reading a bool variable).
+class abort_callback_usehandle : public abort_callback {
+public:
+    abort_callback_usehandle( abort_callback_event handle ) : m_handle(handle) {}
+    
+    bool is_aborting() const override;
+    abort_callback_event get_abort_event() const override { return m_handle; }
+protected:
+    const abort_callback_event m_handle;
+};
+
+class abort_callback_clone : public abort_callback_usehandle {
+public:
+	abort_callback_clone(abort_callback_event handle) : abort_callback_usehandle(clone(handle)) {}
+	abort_callback_clone(abort_callback & arg) : abort_callback_usehandle(clone(arg.get_handle())) {}
+	~abort_callback_clone() { close(m_handle); }
+
+	static abort_callback_event clone(abort_callback_event);
+	static void close(abort_callback_event);
+};
+
 //! Dummy abort_callback that never gets aborted. \n
-//! Slightly more efficient than the regular one especially when you need to regularly create temporary instances of it.
+//! Note that there's no need to create instances of it, use shared fb2k::noAbort object instead.
 class abort_callback_dummy : public abort_callback {
 public:
-	bool is_aborting() const { return false; }
+	bool is_aborting() const override { return false; }
 
-	abort_callback_event get_abort_event() const { return GetInfiniteWaitEvent();}
+	abort_callback_event get_abort_event() const override { return m_event;}
+private:
+	const abort_callback_event m_event = GetInfiniteWaitEvent();
 };
-#else
-
-// FIX ME come up with a scheme to produce a persistent infinite wait filedescriptor on non Windows
-// Could use /dev/null but still need to open it on upon object creation which defeats the purpose
-typedef abort_callback_impl abort_callback_dummy;
-
-#endif
 
 }
 typedef foobar2000_io::abort_callback_event fb2k_event_handle;
@@ -101,4 +128,9 @@ using namespace foobar2000_io;
     PP::aborter aborter_pfcv2( aborterRef );    \
     PP::aborterScope l_aborterScope( aborter_pfcv2 );
 
-#endif //_foobar2000_sdk_abort_callback_h_
+
+namespace fb2k {
+	//! A shared abort_callback_dummy instance. \n
+	//! Use when some function requires an abort_callback& and you don't have one: somefunc(fb2k::noAbort);
+	extern abort_callback_dummy noAbort;
+}

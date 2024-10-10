@@ -1,3 +1,5 @@
+#pragma once
+
 //! Entrypoint interface for declaring component's version information. Instead of implementing this directly, use DECLARE_COMPONENT_VERSION().
 class NOVTABLE componentversion : public service_base {
 public:
@@ -78,6 +80,7 @@ public:
 	FB2K_MAKE_SERVICE_INTERFACE_ENTRYPOINT(component_installation_validator)
 };
 
+#ifdef _WIN32
 //! Simple implementation of component_installation_validator that makes sure that our component DLL has not been renamed around by idiot users.
 class component_installation_validator_filename : public component_installation_validator {
 public:
@@ -91,3 +94,10 @@ private:
 
 #define VALIDATE_COMPONENT_FILENAME(FN) \
 	static service_factory_single_t<component_installation_validator_filename> g_component_installation_validator_filename(FN);
+
+#else // _WIN32
+
+#define VALIDATE_COMPONENT_FILENAME(FN)
+
+#endif // _WIN32
+

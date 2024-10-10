@@ -1,7 +1,6 @@
-#include "stdafx.h"
-#include "dropdown_helper.h"
+#include "StdAfx.h"
 
-#ifdef _WIN32
+#include "dropdown_helper.h"
 
 void _cfg_dropdown_history_base::build_list(pfc::ptr_list_t<char> & out)
 {
@@ -32,6 +31,7 @@ void _cfg_dropdown_history_base::parse_list(const pfc::ptr_list_t<char> & src)
 	set_state(temp);
 }
 
+#ifdef _WIN32
 static void g_setup_dropdown_fromlist(HWND wnd,const pfc::ptr_list_t<char> & list)
 {
 	t_size n, m = list.get_count();
@@ -41,6 +41,16 @@ static void g_setup_dropdown_fromlist(HWND wnd,const pfc::ptr_list_t<char> & lis
 	}
 }
 
+void _cfg_dropdown_history_base::setup_dropdown_set_value(HWND wnd) {
+	pfc::ptr_list_t<char> list;
+	build_list(list);
+	g_setup_dropdown_fromlist(wnd, list);
+	if ( list.get_size() > 0 ) {
+		uSetWindowText(wnd, list[0] );
+	}
+	list.free_all();
+}
+
 void _cfg_dropdown_history_base::setup_dropdown(HWND wnd)
 {
 	pfc::ptr_list_t<char> list;
@@ -48,6 +58,7 @@ void _cfg_dropdown_history_base::setup_dropdown(HWND wnd)
 	g_setup_dropdown_fromlist(wnd,list);
 	list.free_all();
 }
+#endif // _WIN32
 
 bool _cfg_dropdown_history_base::add_item(const char * item)
 {
@@ -75,29 +86,30 @@ bool _cfg_dropdown_history_base::add_item(const char * item)
 	if (!found)
 	{
 		while(list.get_count() > m_max) list.delete_by_idx(list.get_count()-1);
-		list.insert_item(_strdup(item),0);
+		list.insert_item(strdup(item),0);
 	}
 	parse_list(list);
 	list.free_all();
 	return found;
 }
 
+bool _cfg_dropdown_history_base::is_empty()
+{
+    pfc::string8 temp; get_state(temp);
+    const char * src = temp;
+    while(*src)
+    {
+        if (*src!=separator) return false;
+        src++;
+    }
+    return true;
+}
+
+#ifdef _WIN32
 bool _cfg_dropdown_history_base::add_item(const char *item, HWND combobox) {
 	const bool state = add_item(item);
 	if (state) uSendMessageText(combobox, CB_ADDSTRING, 0, item);
 	return state;
-}
-
-bool _cfg_dropdown_history_base::is_empty()
-{
-	pfc::string8 temp; get_state(temp);
-	const char * src = temp;
-	while(*src)
-	{
-		if (*src!=separator) return false;
-		src++;
-	}
-	return true;
 }
 
 bool _cfg_dropdown_history_base::on_context(HWND wnd,LPARAM coords) {
@@ -159,5 +171,4 @@ bool _cfg_dropdown_history_base::on_context(HWND wnd,LPARAM coords) {
 	} catch(...) {}
 	return false;
 }
-
-#endif // _WIN32
+#endif

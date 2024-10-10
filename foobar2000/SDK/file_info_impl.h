@@ -1,5 +1,7 @@
-#ifndef _FOOBAR2000_SDK_FILE_INFO_IMPL_H_
-#define _FOOBAR2000_SDK_FILE_INFO_IMPL_H_
+#pragma once
+
+#include <pfc/array.h>
+#include "file_info.h"
 
 namespace file_info_impl_utils {
 
@@ -69,6 +71,7 @@ namespace file_info_impl_utils {
 	class meta_storage
 	{
 	public:
+		size_t add_blank(const char* name);
 		t_size add_entry(const char * p_name,t_size p_name_length,const char * p_value,t_size p_value_length);
 		void insert_value(t_size p_index,t_size p_value_index,const char * p_value,t_size p_value_length);
 		void modify_value(t_size p_index,t_size p_value_index,const char * p_value,t_size p_value_length);
@@ -129,16 +132,12 @@ public:
 protected:
 	t_size	meta_set_nocheck_ex(const char * p_name,t_size p_name_length,const char * p_value,t_size p_value_length);
 	t_size	info_set_nocheck_ex(const char * p_name,t_size p_name_length,const char * p_value,t_size p_value_length);
-private:
-
 
 	file_info_impl_utils::meta_storage m_meta;
 	file_info_impl_utils::info_storage m_info;
 	
 
-	double m_length;
+	double m_length = 0;
 
 	replaygain_info m_replaygain;
 };
-
-#endif

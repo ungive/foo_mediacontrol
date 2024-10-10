@@ -1,3 +1,5 @@
+#pragma once
+
 class _meta_table_enum_wrapper {
 public:
 	_meta_table_enum_wrapper(file_info & p_info) : m_info(p_info) {}
@@ -103,12 +105,10 @@ public:
 		from_info_overwrite(p_info);
 		from_RG_overwrite(p_info.get_replaygain());
 	}
-	void from_RG_overwrite(replaygain_info info) {
-		replaygain_info::t_text_buffer buffer;
-		if (info.format_album_gain(buffer)) set("replaygain_album_gain", buffer);
-		if (info.format_track_gain(buffer)) set("replaygain_track_gain", buffer);
-		if (info.format_album_peak(buffer)) set("replaygain_album_peak", buffer);
-		if (info.format_track_peak(buffer)) set("replaygain_track_peak", buffer);
+	void from_RG_overwrite(replaygain_info const & info) {
+		info.for_each([&](const char* key, const char* value) {
+			set(key, value);
+		});
 	}
 	void from_info_overwrite(const file_info & p_info) {
 		for(t_size metawalk = 0, metacount = p_info.meta_get_count(); metawalk < metacount; ++metawalk ) {
@@ -125,10 +125,15 @@ public:
 	void reset() {m_data.remove_all();}
 
 	void fix_itunes_compilation() {
-		static const char cmp[] = "itunescompilation";
-		if (m_data.have_item(cmp)) {
-			// m_data.remove(cmp);
-			if (!m_data.have_item("album artist")) add("album artist", "Various Artists");
+		auto entry = m_data.find("itunescompilation");
+		if (entry.is_valid()) {
+			auto val = entry->m_value.first();
+			if (val.is_valid()) {
+				if (atoi(val->c_str()) != 0) {
+					// m_data.remove(cmp);
+					if (!m_data.have_item("album artist")) add("album artist", "Various Artists");
+				}
+			}
 		}
 	}
 private:

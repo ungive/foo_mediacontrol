@@ -1,4 +1,5 @@
-#include "foobar2000.h"
+#include "foobar2000-sdk-pch.h"
+#include "audio_chunk.h"
 
 #ifdef _WIN32
 #include <ks.h>
@@ -49,37 +50,9 @@ static struct {DWORD m_wfx; unsigned m_native; } const g_translation_table[] =
 #endif
 #endif
 
-// foobar2000 channel flags are 1:1 identical to Windows WFX ones.
-uint32_t audio_chunk::g_channel_config_to_wfx(unsigned p_config)
-{
-    return p_config;
-#if 0
-	DWORD ret = 0;
-	unsigned n;
-	for(n=0;n<PFC_TABSIZE(g_translation_table);n++)
-	{
-		if (p_config & g_translation_table[n].m_native) ret |= g_translation_table[n].m_wfx;
-	}
-	return ret;
-#endif
-}
-
-unsigned audio_chunk::g_channel_config_from_wfx(uint32_t p_wfx)
-{
-    return p_wfx;
-#if 0
-	unsigned ret = 0;
-	unsigned n;
-	for(n=0;n<PFC_TABSIZE(g_translation_table);n++)
-	{
-		if (p_wfx & g_translation_table[n].m_wfx) ret |= g_translation_table[n].m_native;
-	}
-	return ret;
-#endif
-}
 
 
-static const unsigned g_audio_channel_config_table[] = 
+static constexpr unsigned g_audio_channel_config_table[] = 
 {
 	0,
 	audio_chunk::channel_config_mono,
@@ -88,42 +61,50 @@ static const unsigned g_audio_channel_config_table[] =
 	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_back_left | audio_chunk::channel_back_right,
 	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_back_left | audio_chunk::channel_back_right | audio_chunk::channel_lfe,
 	audio_chunk::channel_config_5point1,
-	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_back_left | audio_chunk::channel_back_right | audio_chunk::channel_lfe | audio_chunk::channel_front_center_right | audio_chunk::channel_front_center_left,
-	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_back_left | audio_chunk::channel_back_right | audio_chunk::channel_front_center | audio_chunk::channel_lfe | audio_chunk::channel_front_center_right | audio_chunk::channel_front_center_left,
-};
-
-static const unsigned g_audio_channel_config_table_xiph[] = 
-{
+	audio_chunk::channel_config_5point1_side | audio_chunk::channel_back_center,
+	audio_chunk::channel_config_7point1,
 	0,
-	audio_chunk::channel_config_mono,
-	audio_chunk::channel_config_stereo,
-	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_front_center,
-	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_back_left | audio_chunk::channel_back_right,
-	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_back_left | audio_chunk::channel_back_right | audio_chunk::channel_front_center,
-	audio_chunk::channel_config_5point1,
-	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_front_center | audio_chunk::channel_lfe | audio_chunk::channel_back_center | audio_chunk::channel_side_left | audio_chunk::channel_side_right,
-	audio_chunk::channel_front_left | audio_chunk::channel_front_right | audio_chunk::channel_front_center | audio_chunk::channel_lfe | audio_chunk::channel_back_left | audio_chunk::channel_back_right | audio_chunk::channel_side_left | audio_chunk::channel_side_right,
+	audio_chunk::channel_config_7point1 | audio_chunk::channel_front_center_right | audio_chunk::channel_front_center_left,
 };
 
 unsigned audio_chunk::g_guess_channel_config(unsigned count)
 {
-	if (count >= PFC_TABSIZE(g_audio_channel_config_table)) return 0;
-	return g_audio_channel_config_table[count];
+	if (count == 0) return 0;
+	if (count > 32) throw exception_io_data();
+	unsigned ret = 0;
+	if (count < PFC_TABSIZE(g_audio_channel_config_table)) ret = g_audio_channel_config_table[count];
+	if (ret == 0) {
+		// Warning: 1u<<32u behaves stupidly
+		ret = (unsigned)( (1ull << count) - 1 );
+	}
+	PFC_ASSERT(g_count_channels(ret) == count);
+	return ret;	
 }
 
 unsigned audio_chunk::g_guess_channel_config_xiph(unsigned count) {
-	if (count == 0 || count >= PFC_TABSIZE(g_audio_channel_config_table_xiph)) throw exception_io_data();
-	return g_audio_channel_config_table_xiph[count];
+	switch (count) {
+	case 3:
+		return audio_chunk::channel_front_left | audio_chunk::channel_front_center | audio_chunk::channel_front_right;
+	case 5:
+		return audio_chunk::channel_front_left | audio_chunk::channel_front_center | audio_chunk::channel_front_right | audio_chunk::channel_back_left | audio_chunk::channel_back_right;
+	case 7:
+		return audio_chunk::channel_config_5point1 | audio_chunk::channel_back_center;
+	default:
+		return g_guess_channel_config(count);
+	}	
 }
 
 unsigned audio_chunk::g_channel_index_from_flag(unsigned p_config,unsigned p_flag) {
-	unsigned index = 0;
-	for(unsigned walk = 0; walk < 32; walk++) {
-		unsigned query = 1 << walk;
-		if (p_flag & query) return index;
-		if (p_config & query) index++;
+	if (p_config & p_flag) {
+		unsigned index = 0;
+
+		for (unsigned walk = 0; walk < 32; walk++) {
+			unsigned query = 1 << walk;
+			if (p_flag & query) return index;
+			if (p_config & query) index++;
+		}
 	}
-	return ~0;
+	return (unsigned)(-1);
 }
 
 unsigned audio_chunk::g_extract_channel_flag(unsigned p_config,unsigned p_index)
@@ -142,10 +123,6 @@ unsigned audio_chunk::g_extract_channel_flag(unsigned p_config,unsigned p_index)
 	return flag;
 }
 
-unsigned audio_chunk::g_count_channels(unsigned p_config)
-{
-	return pfc::countBits32(p_config);
-}
 
 static const char * const chanNames[] = {
 	"FL", //channel_front_left			= 1<<0,
@@ -198,6 +175,9 @@ const char * audio_chunk::g_channel_name_byidx(unsigned p_index) {
 	else return "?";
 }
 
+pfc::string8 audio_chunk::g_formatChannelMaskDesc(unsigned flags) {
+	pfc::string8 temp; g_formatChannelMaskDesc(flags, temp); return temp;
+}
 void audio_chunk::g_formatChannelMaskDesc(unsigned flags, pfc::string_base & out) {
 	out.reset();
 	unsigned idx = 0;
@@ -210,3 +190,44 @@ void audio_chunk::g_formatChannelMaskDesc(unsigned flags, pfc::string_base & out
 		++idx;
 	}
 }
+
+namespace {
+	struct maskDesc_t {
+		const char* name;
+		unsigned mask;
+	};
+	static constexpr maskDesc_t maskDesc[] = {
+		{"mono", audio_chunk::channel_config_mono},
+		{"stereo", audio_chunk::channel_config_stereo},
+		{"stereo (rear)", audio_chunk::channel_back_left | audio_chunk::channel_back_right},
+		{"stereo (side)", audio_chunk::channel_side_left | audio_chunk::channel_side_right},
+		{"2.1", audio_chunk::channel_config_2point1},
+		{"3.0", audio_chunk::channel_config_3point0},
+		{"4.0", audio_chunk::channel_config_4point0},
+		{"4.1", audio_chunk::channel_config_4point1},
+		{"5.0", audio_chunk::channel_config_5point0},
+		{"5.1", audio_chunk::channel_config_5point1},
+		{"5.1 (side)", audio_chunk::channel_config_5point1_side},
+		{"6.1", audio_chunk::channel_config_5point1 | audio_chunk::channel_back_center},
+		{"6.1 (side)", audio_chunk::channel_config_5point1_side | audio_chunk::channel_back_center},
+		{"7.1", audio_chunk::channel_config_7point1},
+	};
+}
+
+const char* audio_chunk::g_channelMaskName(unsigned flags) {
+	for (auto& walk : maskDesc) {
+		if (flags == walk.mask) return walk.name;
+	}
+	return nullptr;
+}
+
+static_assert( pfc::countBits32(audio_chunk::channel_config_mono) == 1 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_stereo) == 2 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_4point0) == 4 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_4point0_side) == 4 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_4point1) == 5 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_5point0) == 5 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_5point1) == 6 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_5point1_side) == 6 );
+static_assert( pfc::countBits32(audio_chunk::channel_config_6point0) == 6);
+static_assert( pfc::countBits32(audio_chunk::channel_config_7point1) == 8 );

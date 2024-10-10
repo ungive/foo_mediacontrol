@@ -1,13 +1,23 @@
-#include "stdafx.h"
+#include "StdAfx.h"
+#include "create_directory_helper.h"
+#include <pfc/pathUtils.h>
+#include <SDK/file_lock_manager.h>
 
 namespace create_directory_helper
 {
 	static void create_path_internal(const char * p_path,t_size p_base,abort_callback & p_abort) {
 		pfc::string8_fastalloc temp;
+		auto fs = filesystem::get(p_path);
+		auto api_lock = file_lock_manager::get();
 		for(t_size walk = p_base; p_path[walk]; walk++) {
 			if (p_path[walk] == '\\') {
 				temp.set_string(p_path,walk);
-				try {filesystem::g_create_directory(temp.get_ptr(),p_abort);} catch(exception_io_already_exists) {}
+				// 2024-03 Google Drive bug: 
+				// Creating the same folder concurrently from multiple threads causes erratic behavior
+				// Thread that got here first behaves OK, others get "already exists" and return, but creating files in the folder fail with "path not found"
+				// Block other threads trying to do the same until we've finished
+				const auto lock = api_lock->acquire_write(temp, p_abort);
+				fs->make_directory(temp, p_abort);
 			}
 		}
 	}
@@ -88,7 +98,7 @@ namespace create_directory_helper
 				{
 					if (!last_char_is_dir_sep)
 					{
-						if (really_create_dirs) try{filesystem::g_create_directory(out,p_abort);}catch(exception_io_already_exists){}
+						if (really_create_dirs) try{filesystem::g_create_directory(out,p_abort);}catch(exception_io_already_exists const &){}
 						out.add_char('\\');
 						last_char_is_dir_sep = true;
 					}
@@ -116,28 +126,38 @@ namespace create_directory_helper
 }
 
 pfc::string create_directory_helper::sanitize_formatted_path(pfc::stringp formatted, bool allowWC) {
+	return sanitize_formatted_path_ex(formatted, allowWC, pfc::io::path::charReplaceDefault);
+};
+
+pfc::string create_directory_helper::sanitize_formatted_path_ex(pfc::stringp formatted, bool allowWC, charReplace_t replace) {
 	pfc::string out;
 	t_size curSegBase = 0;
-	for(t_size walk = 0; ; ++walk) {
+	for (t_size walk = 0; ; ++walk) {
 		const char c = formatted[walk];
-		if (c == 0 || pfc::io::path::isSeparator(c)) {
+		const bool end = (c == 0);
+		if (end || pfc::io::path::isSeparator(c)) {
 			if (curSegBase < walk) {
-				pfc::string seg( formatted + curSegBase, walk - curSegBase );
-				out = pfc::io::path::combine(out, pfc::io::path::validateFileName(seg, allowWC));
+				pfc::string seg(formatted + curSegBase, walk - curSegBase);
+				out = pfc::io::path::combine(out, pfc::io::path::validateFileName(seg, allowWC, end /*preserve ext*/, replace));
 			}
-			if (c == 0) break;
+			if (end) break;
 			curSegBase = walk + 1;
 		}
 	}
 	return out;
-};
+}
 
-void create_directory_helper::format_filename_ex(const metadb_handle_ptr & handle,titleformat_hook * p_hook,titleformat_object::ptr spec,const char * suffix, pfc::string_base & out) {
+void create_directory_helper::format_filename_ex(const metadb_handle_ptr & handle, titleformat_hook * p_hook, titleformat_object::ptr spec, const char * suffix, pfc::string_base & out) {
+	format_filename_ex(handle, p_hook, spec, suffix, out, pfc::io::path::charReplaceDefault);
+}
+
+void create_directory_helper::format_filename_ex(const metadb_handle_ptr & handle,titleformat_hook * p_hook,titleformat_object::ptr spec,const char * suffix, pfc::string_base & out, charReplace_t replace) {
 	pfc::string_formatter formatted;
     titleformat_text_filter_myimpl filter;
+	filter.m_replace = replace;
 	handle->format_title(p_hook,formatted,spec,&filter);
 	formatted << suffix;
-	out = sanitize_formatted_path(formatted).ptr();
+	out = sanitize_formatted_path_ex(formatted, false, replace).ptr();
 }
 void create_directory_helper::format_filename(const metadb_handle_ptr & handle,titleformat_hook * p_hook,titleformat_object::ptr spec,pfc::string_base & out) {
 	format_filename_ex(handle, p_hook, spec, "", out);
@@ -145,11 +165,19 @@ void create_directory_helper::format_filename(const metadb_handle_ptr & handle,t
 void create_directory_helper::format_filename(const metadb_handle_ptr & handle,titleformat_hook * p_hook,const char * spec,pfc::string_base & out)
 {
 	service_ptr_t<titleformat_object> script;
-	if (static_api_ptr_t<titleformat_compiler>()->compile(script,spec)) {
+	if (titleformat_compiler::get()->compile(script,spec)) {
 		format_filename(handle, p_hook, script, out);
 	} else {
 		out.reset();
 	}
+}
+
+static bool substSanity(const char * subst) {
+	if (subst == nullptr) return false;
+	for (size_t w = 0; subst[w]; ++w) {
+		if (pfc::io::path::isSeparator(subst[w])) return false;
+	}
+	return true;
 }
 
 void create_directory_helper::titleformat_text_filter_myimpl::write(const GUID & p_inputType,pfc::string_receiver & p_out,const char * p_data,t_size p_dataLength) {
@@ -158,10 +186,16 @@ void create_directory_helper::titleformat_text_filter_myimpl::write(const GUID &
 		for(t_size walk = 0; walk < p_dataLength; ++walk) {
 			char c = p_data[walk];
 			if (c == 0) break;
+			const char * subst = nullptr;
 			if (pfc::io::path::isSeparator(c)) {
-				c = '-';
+				if (m_replace) {
+					const char * proposed = m_replace(c);
+					if (substSanity(proposed)) subst = proposed;
+				}
+				if (subst == nullptr) subst = "-";
 			}
-			temp.add_byte(c);
+			if (subst != nullptr) temp.add_string(subst);
+			else temp.add_byte(c);
 		}
 		p_out.add_string(temp);
 	} else p_out.add_string(p_data,p_dataLength);

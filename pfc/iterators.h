@@ -1,10 +1,13 @@
+#pragma once
+#include "ref_counter.h"
+
 namespace pfc {
 	//! Base class for list nodes. Implemented by list implementers.
 	template<typename t_item> class _list_node : public refcounted_object_root {
 	public:
 		typedef _list_node<t_item> t_self;
 
-		TEMPLATE_CONSTRUCTOR_FORWARD_FLOOD(_list_node,m_content)
+        template<typename ... arg_t> _list_node(arg_t && ... arg) : m_content( std::forward<arg_t>(arg) ...) {}
 
 		t_item m_content;
 
@@ -50,6 +53,9 @@ namespace pfc {
 
 		bool operator==(const t_self & other) const throw() {return this->m_content == other.m_content;}
 		bool operator!=(const t_self & other) const throw() {return this->m_content != other.m_content;}
+
+		// Returns pointer to referenced item - null if iterator isn't valid
+		const t_item* get() const noexcept { return this->m_content.is_valid() ? &this->m_content->m_content : nullptr; }
 	protected:
 		t_nodeptr m_content;
 	};
@@ -79,6 +85,42 @@ namespace pfc {
 
 		bool operator==(const t_self & other) const throw() {return this->m_content == other.m_content;}
 		bool operator!=(const t_self & other) const throw() {return this->m_content != other.m_content;}
+
+		// Returns pointer to referenced item - null if iterator isn't valid
+		t_item* get() const noexcept { return this->m_content.is_valid() ? &this->m_content->m_content : nullptr; }
+	};
+
+	template<typename item_t> class forward_iterator {
+		iterator<item_t> m_iter;
+	public:
+		typedef forward_iterator<item_t> self_t;
+		void operator++() { ++m_iter; }
+
+		item_t& operator*() const throw() { return *m_iter; }
+		item_t* operator->() const throw() { return &*m_iter; }
+
+		bool operator==(const self_t& other) const { return m_iter == other.m_iter; }
+		bool operator!=(const self_t& other) const { return m_iter != other.m_iter; }
+
+		forward_iterator() {}
+		forward_iterator(iterator<item_t>&& i) : m_iter(std::move(i)) {}
+	};
+
+
+	template<typename item_t> class forward_const_iterator {
+		const_iterator<item_t> m_iter;
+	public:
+		typedef forward_const_iterator<item_t> self_t;
+		void operator++() { ++m_iter; }
+
+		const item_t& operator*() const throw() { return *m_iter; }
+		const item_t* operator->() const throw() { return &*m_iter; }
+
+		bool operator==(const self_t& other) const { return m_iter == other.m_iter; }
+		bool operator!=(const self_t& other) const { return m_iter != other.m_iter; }
+
+		forward_const_iterator() {}
+		forward_const_iterator(const_iterator<item_t>&& i) : m_iter(std::move(i)) {}
 	};
 
 	template<typename t_comparator = comparator_default>
@@ -112,4 +154,46 @@ namespace pfc {
 			++iter1; ++iter2;
 		}
 	}
+
+	template<typename comparator_t = comparator_default>
+	class comparator_stdlist { 
+	public:
+		template<typename t_list1, typename t_list2>
+		static int compare(const t_list1 & p_list1, const t_list2 & p_list2) {
+			auto iter1 = p_list1.begin();
+			auto iter2 = p_list2.begin();
+			for(;;) {
+				const bool end1 = iter1 == p_list1.end();
+				const bool end2 = iter2 == p_list2.end();
+				if ( end1 && end2 ) return 0;
+				else if ( end1 ) return -1;
+				else if ( end2 ) return 1;
+				else {
+					int state = comparator_t::compare(*iter1,*iter2);
+					if (state != 0) return state;
+				}
+				++iter1; ++iter2;
+			}
+		}
+	};
+}
+
+namespace std {
+
+	template<typename item_t>
+	struct iterator_traits< pfc::forward_iterator< item_t > > {
+		typedef ptrdiff_t difference_type;
+		typedef item_t value_type;
+		typedef value_type* pointer;
+		typedef value_type& reference;
+		typedef std::forward_iterator_tag iterator_category;
+	};
+	template<typename item_t>
+	struct iterator_traits< pfc::forward_const_iterator< item_t > > {
+		typedef ptrdiff_t difference_type;
+		typedef item_t value_type;
+		typedef const value_type* pointer;
+		typedef const value_type& reference;
+		typedef std::forward_iterator_tag iterator_category;
+	};
 }

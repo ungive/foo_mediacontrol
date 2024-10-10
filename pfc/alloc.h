@@ -1,3 +1,7 @@
+#pragma once
+
+#include "primitives.h"
+
 namespace pfc {
 
 	static void * raw_malloc(t_size p_size) {
@@ -6,13 +10,13 @@ namespace pfc {
 
 	static void raw_free(void * p_block) throw() {free(p_block);}
 
-	static void* raw_realloc(void * p_ptr,t_size p_size) {
+	inline void* raw_realloc(void * p_ptr,t_size p_size) {
 		if (p_size == 0) {raw_free(p_ptr); return NULL;}
 		else if (p_ptr == NULL) return raw_malloc(p_size);
 		else return pfc::new_ptr_check_t(::realloc(p_ptr,p_size));
 	}
 
-	static bool raw_realloc_inplace(void * p_block,t_size p_size) throw() {
+	inline bool raw_realloc_inplace(void * p_block,t_size p_size) throw() {
 		if (p_block == NULL) return p_size == 0;
 #ifdef _MSC_VER
 		if (p_size == 0) return false;
@@ -121,14 +125,14 @@ namespace pfc {
 
 		~alloc_simple() {delete[] m_data;}
 
-		void move_from(t_self & other) {
+		void move_from(t_self & other) noexcept {
 			delete[] m_data;
 			m_data = replace_null_t(other.m_data);
 			m_size = replace_null_t(other.m_size);
 		}
 	private:
-		const t_self & operator=(const t_self &) {throw pfc::exception_not_implemented();}
-		alloc_simple(const t_self&) {throw pfc::exception_not_implemented();}
+		const t_self & operator=(const t_self &) = delete;
+		alloc_simple(const t_self&) = delete;
 
 		t_item * m_data;
 		t_size m_size;
@@ -173,8 +177,8 @@ namespace pfc {
 			m_size_total = replace_null_t(other.m_size_total);
 		}
 	private:
-		const t_self & operator=(const t_self &) {throw pfc::exception_not_implemented();}
-		__array_fast_helper_t(const t_self &) {throw pfc::exception_not_implemented();}
+		const t_self & operator=(const t_self &) = delete;
+		__array_fast_helper_t(const t_self &) = delete;
 
 
 		void resize_content(t_size p_size) {
@@ -258,8 +262,8 @@ namespace pfc {
 			m_size = replace_null_t(other.m_size);
 		}
 	private:
-		const t_self & operator=(const t_self &) {throw pfc::exception_not_implemented();}
-		__array_lite_helper_t(const t_self &) {throw pfc::exception_not_implemented();}
+		const t_self & operator=(const t_self &) = delete;
+		__array_lite_helper_t(const t_self &) = delete;
 
 
 		void resize_content(t_size p_size) {
@@ -327,8 +331,8 @@ namespace pfc {
 
 		void move_from(t_self & other) { m_content.move_from(other.m_content); }
 	private:
-		alloc_standard(const t_self &) {throw pfc::exception_not_implemented();}
-		const t_self & operator=(const t_self&) {throw pfc::exception_not_implemented();}
+		alloc_standard(const t_self &) = delete;
+		const t_self & operator=(const t_self&) = delete;
 
 		__array_lite_helper_t<t_item> m_content;
 	};
@@ -364,8 +368,8 @@ namespace pfc {
 
 		void move_from(t_self & other) { m_data.move_from(other.m_data); }
 	private:
-		alloc_fast(const t_self &) {throw pfc::exception_not_implemented();}
-		const t_self & operator=(const t_self&) {throw pfc::exception_not_implemented();}
+		alloc_fast(const t_self &) = delete;
+		const t_self & operator=(const t_self&) = delete;
 		__array_fast_helper_t<t_item> m_data;
 	};
 
@@ -407,8 +411,8 @@ namespace pfc {
 
 		void move_from(t_self & other) { m_data.move_from(other.m_data); }
 	private:
-		alloc_fast_aggressive(const t_self &) {throw pfc::exception_not_implemented();}
-		const t_self & operator=(const t_self&) {throw pfc::exception_not_implemented();}
+		alloc_fast_aggressive(const t_self &) = delete;
+		const t_self & operator=(const t_self&) = delete;
 		__array_fast_helper_t<t_item> m_data;
 	};
 

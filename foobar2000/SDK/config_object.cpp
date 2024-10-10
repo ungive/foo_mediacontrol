@@ -1,24 +1,21 @@
-#include "foobar2000.h"
+#include "foobar2000-sdk-pch.h"
+#include "config_object_impl.h"
+#include "configStore.h"
 
 void config_object_notify_manager::g_on_changed(const service_ptr_t<config_object> & p_object)
 {
 	if (core_api::assert_main_thread())
 	{
-		service_enum_t<config_object_notify_manager> e;
-		service_ptr_t<config_object_notify_manager> ptr;
-		while(e.next(ptr))
+		for (auto ptr : enumerate()) {
 			ptr->on_changed(p_object);
+		}
 	}
 }
 
 bool config_object::g_find(service_ptr_t<config_object> & p_out,const GUID & p_guid)
 {
-	service_ptr_t<config_object> ptr;
-	service_enum_t<config_object> e;
-	while(e.next(ptr))
-	{
-		if (ptr->get_guid() == p_guid)
-		{
+	for (auto ptr : enumerate()) {
+		if (ptr->get_guid() == p_guid) {
 			p_out = ptr;
 			return true;
 		}
@@ -146,23 +143,20 @@ namespace {
 t_size config_object::get_data_raw(void * p_out,t_size p_bytes) {
 	t_size ret = 0;
     stream_writer_fixedbuffer stream(p_out,p_bytes,ret);
-    abort_callback_dummy aborter;
-	get_data(&stream,aborter);
+	get_data(&stream,fb2k::noAbort);
 	return ret;
 }
 
 t_size config_object::get_data_raw_length() {
 	t_size ret = 0;
     stream_writer_get_length stream(ret);
-    abort_callback_dummy aborter;
-	get_data(&stream,aborter);
+	get_data(&stream,fb2k::noAbort);
 	return ret;
 }
 
 void config_object::set_data_raw(const void * p_data,t_size p_bytes, bool p_notify) {
     stream_reader_memblock_ref stream(p_data,p_bytes);
-    abort_callback_dummy aborter;
-	set_data(&stream,aborter,p_notify);
+	set_data(&stream,fb2k::noAbort,p_notify);
 }
 
 void config_object::set_data_string(const char * p_data,t_size p_length) {
@@ -171,25 +165,27 @@ void config_object::set_data_string(const char * p_data,t_size p_length) {
 
 void config_object::get_data_string(pfc::string_base & p_out) {
     stream_writer_string stream(p_out);
-    abort_callback_dummy aborter;
-	get_data(&stream,aborter);
+	get_data(&stream,fb2k::noAbort);
 }
 
 
 //config_object_impl stuff
 
+#if FOOBAR2020
+pfc::string8 config_object_impl::formatName() const {
+	return pfc::format("config_object.", pfc::print_guid(get_guid()));
+}
 
 void config_object_impl::get_data(stream_writer * p_stream,abort_callback & p_abort) const {
-	insync(m_sync);
-	p_stream->write_object(m_data.get_ptr(),m_data.get_size(),p_abort);
+	auto blob = fb2k::configStore::get()->getConfigBlob(formatName(), m_initial);
+	if (blob.is_valid()) p_stream->write(blob->data(), blob->size(), p_abort);
 }
 
 void config_object_impl::set_data(stream_reader * p_stream,abort_callback & p_abort,bool p_notify) {
 	core_api::ensure_main_thread();
 
 	{
-		insync(m_sync);
-		m_data.set_size(0);
+		pfc::mem_block data;
 		enum {delta = 1024};
 		t_uint8 buffer[delta];
 		for(;;)
@@ -198,9 +194,46 @@ void config_object_impl::set_data(stream_reader * p_stream,abort_callback & p_ab
 			
 			if (delta_done > 0)
 			{
-				m_data.append_fromptr(buffer,delta_done);
+				data.append_fromptr(buffer,delta_done);
 			}
 			
+			if (delta_done != delta) break;
+		}
+
+		auto blob = fb2k::memBlock::blockWithData(std::move(data));
+		fb2k::configStore::get()->setConfigBlob(formatName(), blob);
+	}
+
+	if (p_notify) config_object_notify_manager::g_on_changed(this);
+}
+
+config_object_impl::config_object_impl(const GUID & p_guid,const void * p_data,t_size p_bytes) : cfg_var_reader(p_guid)
+{
+	if (p_bytes > 0) m_initial = fb2k::makeMemBlock(p_data, p_bytes);
+}
+#else // FOOBAR2020
+void config_object_impl::get_data(stream_writer* p_stream, abort_callback& p_abort) const {
+	inReadSync(m_sync);
+	p_stream->write_object(m_data.get_ptr(), m_data.get_size(), p_abort);
+}
+
+void config_object_impl::set_data(stream_reader* p_stream, abort_callback& p_abort, bool p_notify) {
+	core_api::ensure_main_thread();
+
+	{
+		inWriteSync(m_sync);
+		m_data.set_size(0);
+		enum { delta = 1024 };
+		t_uint8 buffer[delta];
+		for (;;)
+		{
+			t_size delta_done = p_stream->read(buffer, delta, p_abort);
+
+			if (delta_done > 0)
+			{
+				m_data.append_fromptr(buffer, delta_done);
+			}
+
 			if (delta_done != delta) break;
 		}
 	}
@@ -208,7 +241,8 @@ void config_object_impl::set_data(stream_reader * p_stream,abort_callback & p_ab
 	if (p_notify) config_object_notify_manager::g_on_changed(this);
 }
 
-config_object_impl::config_object_impl(const GUID & p_guid,const void * p_data,t_size p_bytes) : cfg_var(p_guid)
+config_object_impl::config_object_impl(const GUID& p_guid, const void* p_data, t_size p_bytes) : cfg_var(p_guid)
 {
-	m_data.set_data_fromptr((const t_uint8*)p_data,p_bytes);
+	m_data.set_data_fromptr((const t_uint8*)p_data, p_bytes);
 }
+#endif

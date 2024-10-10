@@ -1,8 +1,14 @@
+#pragma once
+#include "album_art.h"
+
 //! Implements album_art_data.
 class album_art_data_impl : public album_art_data {
 public:
-	const void * get_ptr() const {return m_content.get_ptr();}
-	t_size get_size() const {return m_content.get_size();}
+	const void * data() const override {return m_content.get_ptr();}
+	size_t size() const override {return m_content.get_size();}
+
+	const void * get_data() const { return m_content.get_ptr(); }
+	size_t sizeget_() const { return m_content.get_size(); }
 
 	void * get_ptr() {return m_content.get_ptr();}
 	void set_size(t_size p_size) {m_content.set_size(p_size);}
@@ -45,52 +51,64 @@ public:
 	bool remove(const GUID & p_what) {
 		return m_content.remove(p_what);
 	}
+	void remove_all() {
+		m_content.remove_all();
+	}
 private:
 	pfc::map_t<GUID,album_art_data_ptr> m_content;
 };
 
 //! Helper implementation of album_art_extractor - reads album art from arbitrary file formats that comply with APEv2 tagging specification.
-class album_art_extractor_impl_stdtags : public album_art_extractor {
+class album_art_extractor_impl_stdtags : public album_art_extractor_v2 {
 public:
 	//! @param exts Semicolon-separated list of file format extensions to support.
-	album_art_extractor_impl_stdtags(const char * exts) {
+	album_art_extractor_impl_stdtags(const char * exts, const GUID & guid) : m_guid(guid) {
 		pfc::splitStringSimple_toList(m_extensions,';',exts);
 	}
 
-	bool is_our_path(const char * p_path,const char * p_extension) {
+	bool is_our_path(const char * p_path,const char * p_extension) override {
 		return m_extensions.have_item(p_extension);
 	}
 
-	album_art_extractor_instance_ptr open(file_ptr p_filehint,const char * p_path,abort_callback & p_abort) {
+	album_art_extractor_instance_ptr open(file_ptr p_filehint,const char * p_path,abort_callback & p_abort) override {
 		PFC_ASSERT( is_our_path(p_path, pfc::string_extension(p_path) ) );
 		file_ptr l_file ( p_filehint );
 		if (l_file.is_empty()) filesystem::g_open_read(l_file, p_path, p_abort);
-		return static_api_ptr_t<tag_processor_album_art_utils>()->open( l_file, p_abort );
+		return tag_processor_album_art_utils::get()->open( l_file, p_abort );
+	}
+
+	GUID get_guid() override { 
+		return m_guid;
 	}
 private:
 	pfc::avltree_t<pfc::string,pfc::string::comparatorCaseInsensitiveASCII> m_extensions;
+	const GUID m_guid;
 };
 
 //! Helper implementation of album_art_editor - edits album art from arbitrary file formats that comply with APEv2 tagging specification.
-class album_art_editor_impl_stdtags : public album_art_editor {
+class album_art_editor_impl_stdtags : public album_art_editor_v2 {
 public:
 	//! @param exts Semicolon-separated list of file format extensions to support.
-	album_art_editor_impl_stdtags(const char * exts) {
+	album_art_editor_impl_stdtags(const char * exts, const GUID & guid) : m_guid(guid) {
 		pfc::splitStringSimple_toList(m_extensions,';',exts);
 	}
 
-	bool is_our_path(const char * p_path,const char * p_extension) {
+	bool is_our_path(const char * p_path,const char * p_extension) override {
 		return m_extensions.have_item(p_extension);
 	}
 
-	album_art_editor_instance_ptr open(file_ptr p_filehint,const char * p_path,abort_callback & p_abort) {
+	album_art_editor_instance_ptr open(file_ptr p_filehint,const char * p_path,abort_callback & p_abort) override {
 		PFC_ASSERT( is_our_path(p_path, pfc::string_extension(p_path) ) );
 		file_ptr l_file ( p_filehint );
 		if (l_file.is_empty()) filesystem::g_open(l_file, p_path, filesystem::open_mode_write_existing, p_abort);
-		return static_api_ptr_t<tag_processor_album_art_utils>()->edit( l_file, p_abort );
+		return tag_processor_album_art_utils::get()->edit( l_file, p_abort );
+	}
+	GUID get_guid() override {
+		return m_guid;
 	}
 private:
 	pfc::avltree_t<pfc::string,pfc::string::comparatorCaseInsensitiveASCII> m_extensions;
+	const GUID m_guid;
 
 };
 
@@ -132,6 +150,7 @@ private:
 //! album_art_path_list implementation helper
 class album_art_path_list_impl : public album_art_path_list {
 public:
+	album_art_path_list_impl(const char* single) { m_data.set_size(1); m_data[0] = single; }
 	template<typename t_in> album_art_path_list_impl(const t_in & in) {pfc::list_to_array(m_data, in);}
 	const char * get_path(t_size index) const {return m_data[index];}
 	t_size get_count() const {return m_data.get_size();}
@@ -142,6 +161,6 @@ private:
 //! album_art_path_list implementation helper
 class album_art_path_list_dummy : public album_art_path_list {
 public:
-	const char * get_path(t_size index) const {uBugCheck();}
+	const char * get_path(t_size index) const {FB2K_BugCheck();}
 	t_size get_count() const {return 0;}
 };

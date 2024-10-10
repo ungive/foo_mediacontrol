@@ -1,3 +1,8 @@
+#pragma once
+#include "avltree.h"
+#include "bsearch_inline.h"
+#include "array.h"
+
 namespace pfc {
 	//! Generic variable bit array implementation. \n
 	//! Not very efficient to handle lots of items set to true but offers fast searches for true values and accepts arbitrary indexes, contrary to bit_array_bittable. Note that searches for false values are relatively inefficient.
@@ -30,6 +35,8 @@ namespace pfc {
 		t_size find(bool val,t_size start,t_ssize count) const;
 
 		void presort();
+
+		size_t get_count() const { return m_content.get_size(); }
 
 	private:
 		bool _findNearestUp( size_t val, size_t & outIdx ) const;

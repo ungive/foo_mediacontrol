@@ -1,6 +1,12 @@
-#include "foobar2000.h"
+#include "foobar2000-sdk-pch.h"
+
+#include "contextmenu_manager.h"
+#include "menu_helpers.h"
+#include "playlist.h"
 
 #ifdef WIN32
+
+#include "ui_element_typable_window_manager.h"
 
 static void fix_ampersand(const char * src,pfc::string_base & out)
 {
@@ -72,21 +78,12 @@ void contextmenu_manager::win32_build_menu(HMENU menu,contextmenu_node * parent,
 	}
 }
 
-#endif
 
 bool contextmenu_manager::get_description_by_id(unsigned id,pfc::string_base & out) {
 	contextmenu_node * ptr = find_by_id(id);
 	if (ptr == NULL) return false;
 	return ptr->get_description(out);
 }
-bool contextmenu_manager::execute_by_id(unsigned id) {
-	contextmenu_node * ptr = find_by_id(id);
-	if (ptr == NULL) return false;
-	ptr->execute();
-	return true;
-}
-
-#ifdef WIN32
 
 void contextmenu_manager::win32_run_menu_popup(HWND parent,const POINT * pt)
 {
@@ -168,8 +165,9 @@ namespace {
 		bool check_string(const char * src)
 		{//check for existing mnemonics
 			const char * ptr = src;
-			while(ptr = strchr(ptr,'&'))
-			{
+			for( ;; ) {
+				ptr = strchr(ptr, '&');
+				if (ptr == nullptr) break;
 				if (ptr[1]=='&') ptr+=2;
 				else
 				{
@@ -223,8 +221,10 @@ namespace {
 
 void menu_helpers::win32_auto_mnemonics(HMENU menu)
 {
+	PFC_ASSERT(IsMenu(menu));
 	mnemonic_manager mgr;
-	unsigned n, m = GetMenuItemCount(menu);
+	int n, m = GetMenuItemCount(menu);
+	PFC_ASSERT(m >= 0);
 	pfc::string8_fastalloc temp,temp2;
 	for(n=0;n<m;n++)//first pass, check existing mnemonics
 	{
@@ -257,7 +257,6 @@ void menu_helpers::win32_auto_mnemonics(HMENU menu)
 	}
 }
 
-#endif
 
 static bool test_key(unsigned k)
 {
@@ -311,8 +310,7 @@ bool keyboard_shortcut_manager::on_keydown_auto(WPARAM wp)
 bool keyboard_shortcut_manager::on_keydown_auto_playlist(WPARAM wp)
 {
 	metadb_handle_list data;
-	static_api_ptr_t<playlist_manager> api;
-	api->activeplaylist_get_selected_items(data);
+	playlist_manager::get()->activeplaylist_get_selected_items(data);
 	return on_keydown_auto_context(data,wp,contextmenu_item::caller_playlist);
 }
 
@@ -322,7 +320,7 @@ bool keyboard_shortcut_manager::on_keydown_auto_context(const pfc::list_base_con
 	else return on_keydown_auto(wp);
 }
 
-static bool should_relay_key_restricted(UINT p_key) {
+static bool should_relay_key_restricted(WPARAM p_key) {
 	switch(p_key) {
 	case VK_LEFT:
 	case VK_RIGHT:
@@ -349,9 +347,14 @@ bool keyboard_shortcut_manager::on_keydown_restricted_auto_context(const pfc::li
 
 static bool filterTypableWindowMessage(const MSG * msg, t_uint32 modifiers) {
 	if (keyboard_shortcut_manager::is_typing_key_combo((t_uint32)msg->wParam, modifiers)) {
-		try {
-			if (static_api_ptr_t<ui_element_typable_window_manager>()->is_registered(msg->hwnd)) return false;
-		} catch(exception_service_not_found) {}
+		const DWORD mask = DLGC_HASSETSEL | DLGC_WANTCHARS | DLGC_WANTARROWS;
+		auto status = ::SendMessage(msg->hwnd, WM_GETDLGCODE,0, 0);
+		if ( (status & mask) == mask ) return false;
+
+		ui_element_typable_window_manager::ptr api;
+		if (ui_element_typable_window_manager::tryGet(api)) {
+			if (api->is_registered(msg->hwnd)) return false;
+		}
 	}
 	return true;
 }
@@ -406,5 +409,17 @@ bool keyboard_shortcut_manager::is_typing_message(HWND editbox, const MSG * msg)
 }
 bool keyboard_shortcut_manager::is_typing_message(const MSG * msg) {
 	if (msg->message != WM_KEYDOWN && msg->message != WM_SYSKEYDOWN) return false;
-	return is_typing_key_combo(msg->wParam, GetHotkeyModifierFlags());
+	return is_typing_key_combo((uint32_t)msg->wParam, GetHotkeyModifierFlags());
 }
+
+#endif // _WIN32
+
+bool contextmenu_manager::execute_by_id(unsigned id) {
+    contextmenu_node * ptr = find_by_id(id);
+    if (ptr == NULL) return false;
+    ptr->execute();
+    return true;
+}
+
+void contextmenu_manager::g_create(service_ptr_t<contextmenu_manager>& p_out) { standard_api_create_t(p_out); }
+service_ptr_t<contextmenu_manager> contextmenu_manager::g_create() { service_ptr_t<contextmenu_manager> ret; standard_api_create_t(ret); return ret; }

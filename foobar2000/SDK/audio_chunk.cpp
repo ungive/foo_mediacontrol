@@ -1,16 +1,36 @@
-#include "foobar2000.h"
+#include "foobar2000-sdk-pch.h"
+#include "mem_block_container.h"
+#include "audio_chunk.h"
 
-void audio_chunk::set_data(const audio_sample * src,t_size samples,unsigned nch,unsigned srate,unsigned channel_config)
-{
-	t_size size = samples * nch;
-	set_data_size(size);
+void audio_chunk::allocate(size_t size, bool bQuicker) {
+	if (bQuicker) {
+		const size_t before = this->get_data_size();
+		const size_t allow_waste = pfc::max_t<size_t>(size, 4096);
+		const size_t upper = (size + allow_waste > size) ? size + allow_waste : SIZE_MAX;
+		if (before >= size && before <= upper) return;
+	}
+	this->set_data_size(size);
+}
+
+void audio_chunk::set_data(const audio_sample* src, size_t samples, spec_t const & spec, bool bQuicker) {
+	t_size size = samples * spec.chanCount;
+	allocate(size, bQuicker);
 	if (src)
-		pfc::memcpy_t(get_data(),src,size);
+		pfc::memcpy_t(get_data(), src, size);
 	else
-		pfc::memset_t(get_data(),(audio_sample)0,size);
+		pfc::memset_t(get_data(), (audio_sample)0, size);
 	set_sample_count(samples);
-	set_channels(nch,channel_config);
-	set_srate(srate);
+	set_spec(spec);
+}
+
+void audio_chunk::set_data(const audio_sample* src, size_t samples, unsigned nch, unsigned srate, unsigned channel_config)
+{
+	set_data(src, samples, makeSpec(srate, nch, channel_config));
+}
+
+void audio_chunk::set_data(const audio_sample* src, size_t samples, unsigned nch, unsigned srate) {
+
+	set_data(src, samples, makeSpec(srate, nch));
 }
 
 inline bool check_exclusive(unsigned val, unsigned mask)
@@ -22,21 +42,21 @@ static void _import8u(uint8_t const * in, audio_sample * out, size_t count) {
 	for(size_t walk = 0; walk < count; ++walk) {
 		uint32_t i = *(in++);
 		i -= 0x80; // to signed
-		*(out++) = (float) (int32_t) i / (float) 0x80;
+		*(out++) = (audio_sample) (int32_t) i / (float) 0x80;
 	}
 }
 
 static void _import8s(uint8_t const * in, audio_sample * out, size_t count) {
 	for(size_t walk = 0; walk < count; ++walk) {
 		int32_t i = (int8_t) *(in++);
-		*(out++) = (float) i / (float) 0x80;
+		*(out++) = (audio_sample) i / (float) 0x80;
 	}
 }
 
 static audio_sample _import24s(uint32_t i) {
 	i ^= 0x800000; // to unsigned
 	i -= 0x800000; // and back to signed / fill MSBs proper
-	return (float) (int32_t) i / (float) 0x800000;
+	return (audio_sample) (int32_t) i / (audio_sample) 0x800000;
 }
 
 static void _import24(const void * in_, audio_sample * out, size_t count) {
@@ -97,11 +117,11 @@ template<bool byteSwap, bool isSigned> static void _import16any(const void * in,
 
 template<bool byteSwap, bool isSigned> static void _import32any(const void * in, audio_sample * out, size_t count) {
 	uint32_t const * inPtr = (uint32_t const*) in;
-	const audio_sample factor = 1.0f / (audio_sample) 0x80000000;
+	const audio_sample factor = 1.0f / (audio_sample) 0x80000000ul;
 	for(size_t walk = 0; walk < count; ++walk) {
 		uint32_t v = *inPtr++;
 		if (byteSwap) v = pfc::byteswap_t(v);
-		if (!isSigned) v ^= 0x80000000; // to signed
+		if (!isSigned) v ^= 0x80000000u; // to signed
 		*out++ = (audio_sample) (int32_t) v * factor;
 	}
 }
@@ -267,7 +287,7 @@ void audio_chunk::set_data_int16(const int16_t * src,t_size samples,unsigned nch
 template<class t_float>
 static void process_float_multi(audio_sample * p_out,const t_float * p_in,const t_size p_count)
 {
-	for(size_t n=0;n<p_count;n++) p_out[n] = (audio_sample)p_in[n];
+	audio_math::convert(p_in, p_out, p_count);
 }
 
 template<class t_float>
@@ -278,10 +298,27 @@ static void process_float_multi_swap(audio_sample * p_out,const t_float * p_in,c
 	}
 }
 
+void audio_chunk::set_data_32(const float* src, size_t samples, spec_t const& spec) {
+#if audio_sample_size == 32
+	set_data(src, samples, spec);
+#else
+	t_size size = samples * spec.chanCount;
+	set_data_size(size);
+	if (src)
+		audio_math::convert(src, get_data(), size);
+	else
+		pfc::memset_t(get_data(), (audio_sample)0, size);
+	set_sample_count(samples);
+	set_spec(spec);
+#endif
+}
+void audio_chunk::set_data_32(const float* src, size_t samples, unsigned nch, unsigned srate) { 
+	set_data_32(src, samples, makeSpec(srate, nch) );
+}
 
 void audio_chunk::set_data_floatingpoint_ex(const void * ptr,t_size size,unsigned srate,unsigned nch,unsigned bps,unsigned flags,unsigned p_channel_config)
 {
-	PFC_ASSERT(bps==32 || bps==64 || bps == 16 || bps == 24);
+	PFC_ASSERT(is_supported_floatingpoint(bps));
 	PFC_ASSERT( check_exclusive(flags,FLAG_LITTLE_ENDIAN|FLAG_BIG_ENDIAN) );
 	PFC_ASSERT( ! (flags & (FLAG_SIGNED|FLAG_UNSIGNED) ) );
 
@@ -325,13 +362,32 @@ void audio_chunk::set_data_floatingpoint_ex(const void * ptr,t_size size,unsigne
 	set_channels(nch,p_channel_config);
 }
 
+pfc::string8 audio_chunk::formatChunkSpec() const {
+	pfc::string8 msg;
+	msg << get_sample_rate() << " Hz, " << get_channels() << ":0x" << pfc::format_hex(get_channel_config(), 2) << " channels, " << get_sample_count() << " samples";
+	return msg;
+}
+
+void audio_chunk::debugChunkSpec() const {
+	FB2K_DebugLog() << "Chunk: " << this->formatChunkSpec();
+}
+
+#if PFC_DEBUG
+void audio_chunk::assert_valid(const char * ctx) const {
+	if (!is_valid()) {
+		FB2K_DebugLog() << "audio_chunk::assert_valid failure in " << ctx;
+		debugChunkSpec();
+		uBugCheck();
+	}
+}
+#endif
 bool audio_chunk::is_valid() const
 {
 	unsigned nch = get_channels();
-	if (nch==0 || nch>256) return false;
+	if (nch == 0 || nch > 32) return false;
 	if (!g_is_valid_sample_rate(get_srate())) return false;
 	t_size samples = get_sample_count();
-	if (samples==0 || samples >= 0x80000000 / (sizeof(audio_sample) * nch) ) return false;
+	if (samples==0 || samples >= 0x80000000ul / (sizeof(audio_sample) * nch) ) return false;
 	t_size size = get_data_size();
 	if (samples * nch > size) return false;
 	if (!get_data()) return false;
@@ -454,7 +510,7 @@ namespace {
 struct sampleToIntDesc {
 	unsigned bps, bpsValid;
 	bool useUpperBits;
-	float scale;
+	audio_sample scale;
 };
 template<typename int_t> class sampleToInt {
 public:
@@ -477,7 +533,7 @@ public:
 private:
 	int_t clipLo, clipHi;
 	int8_t shift;
-	float scale;
+	audio_sample scale;
 };
 }
 static void render_24bit(const audio_sample * in, t_size inLen, void * out, sampleToIntDesc const & d) {
@@ -514,7 +570,7 @@ static void render_32bit_(const audio_sample * in, t_size inLen, void * out, sam
 	}
 }
 
-bool audio_chunk::g_toFixedPoint(const audio_sample * in, void * out, size_t count, uint32_t bps, uint32_t bpsValid, bool useUpperBits, float scale) {
+bool audio_chunk::g_toFixedPoint(const audio_sample * in, void * out, size_t count, uint32_t bps, uint32_t bpsValid, bool useUpperBits, audio_sample scale) {
 	const sampleToIntDesc d = {bps, bpsValid, useUpperBits, scale};
 	if (bps == 0) {
 		PFC_ASSERT(!"How did we get here?");
@@ -539,7 +595,7 @@ bool audio_chunk::g_toFixedPoint(const audio_sample * in, void * out, size_t cou
 	return true;
 }
 
-bool audio_chunk::toFixedPoint(class mem_block_container & out, uint32_t bps, uint32_t bpsValid, bool useUpperBits, float scale) const {
+bool audio_chunk::toFixedPoint(class mem_block_container & out, uint32_t bps, uint32_t bpsValid, bool useUpperBits, audio_sample scale) const {
 	bps = (bps + 7) & ~7;
 	if (bps < bpsValid) return false;
 	const size_t count = get_sample_count() * get_channel_count();
@@ -547,7 +603,7 @@ bool audio_chunk::toFixedPoint(class mem_block_container & out, uint32_t bps, ui
 	return g_toFixedPoint(get_data(), out.get_ptr(), count, bps, bpsValid, useUpperBits, scale);
 }
 
-bool audio_chunk::to_raw_data(mem_block_container & out, t_uint32 bps, bool useUpperBits, float scale) const {
+bool audio_chunk::to_raw_data(mem_block_container & out, t_uint32 bps, bool useUpperBits, audio_sample scale) const {
 	uint32_t bpsValid = bps;
 	bps = (bps + 7) & ~7;
 	const size_t count = get_sample_count() * get_channel_count();
@@ -556,7 +612,7 @@ bool audio_chunk::to_raw_data(mem_block_container & out, t_uint32 bps, bool useU
 	audio_sample const * inPtr = get_data();
 	if (bps == 32) {
 		float * f = (float*) outPtr;
-		for(size_t w = 0; w < count; ++w) f[w] = inPtr[w] * scale;
+		audio_math::convert(inPtr, f, count, scale);
 		return true;
 	} else {
 		return g_toFixedPoint(inPtr, outPtr, count, bps, bpsValid, useUpperBits, scale);
@@ -568,6 +624,7 @@ audio_chunk::spec_t audio_chunk::makeSpec(uint32_t rate, uint32_t channels) {
 }
 
 audio_chunk::spec_t audio_chunk::makeSpec(uint32_t rate, uint32_t channels, uint32_t mask) {
+	PFC_ASSERT(mask == 0 || pfc::countBits32(mask) == channels);
 	spec_t spec = {};
 	spec.sampleRate = rate; spec.chanCount = channels; spec.chanMask = mask;
 	return spec;
@@ -575,6 +632,23 @@ audio_chunk::spec_t audio_chunk::makeSpec(uint32_t rate, uint32_t channels, uint
 
 bool audio_chunk::spec_t::equals( const spec_t & v1, const spec_t & v2 ) {
 	return v1.sampleRate == v2.sampleRate && v1.chanCount == v2.chanCount && v1.chanMask == v2.chanMask;
+}
+
+pfc::string8 audio_chunk::spec_t::toString(const char * delim) const {
+	pfc::string_formatter temp;
+	if ( sampleRate > 0 ) temp << sampleRate << "Hz";
+	if (chanCount > 0) {
+		if ( temp.length() > 0 ) temp << delim;
+		temp << chanCount << "ch";
+	}
+
+	if ( chanMask != audio_chunk::channel_config_mono && chanMask != audio_chunk::channel_config_stereo ) {
+		pfc::string8 strMask;
+		audio_chunk::g_formatChannelMaskDesc( chanMask, strMask );
+		if ( temp.length() > 0) temp << delim;
+		temp << strMask;
+	}		
+	return temp;
 }
 
 audio_chunk::spec_t audio_chunk::get_spec() const {
@@ -595,20 +669,72 @@ bool audio_chunk::spec_t::is_valid() const {
     return true;
 }
 
-double duration_counter::query() const {
-	double acc = m_offset;
-	for(t_map::const_iterator walk = m_sampleCounts.first(); walk.is_valid(); ++walk) {
-		acc += audio_math::samples_to_time(walk->m_value, walk->m_key);
-	}
-	return acc;
+#ifdef _WIN32
+
+WAVEFORMATEX audio_chunk::spec_t::toWFX() const {
+	const uint32_t sampleWidth = sizeof(audio_sample);
+
+	WAVEFORMATEX wfx = {};
+	wfx.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+	wfx.nChannels = chanCount;
+	wfx.nSamplesPerSec = sampleRate;
+	wfx.nAvgBytesPerSec = sampleRate * chanCount * sampleWidth;
+	wfx.nBlockAlign = chanCount * sampleWidth;
+	wfx.wBitsPerSample = sampleWidth * 8;
+	return wfx;
 }
 
-uint64_t duration_counter::queryAsSampleCount( uint32_t rate ) {
-	uint64_t samples = 0;
-	double acc = m_offset;
-	for(t_map::const_iterator walk = m_sampleCounts.first(); walk.is_valid(); ++walk) {
-		if (walk->m_key == rate) samples += walk->m_value;
-		else acc += audio_math::samples_to_time(walk->m_value, walk->m_key);
+WAVEFORMATEXTENSIBLE audio_chunk::spec_t::toWFXEX() const {
+	const uint32_t sampleWidth = sizeof(audio_sample);
+	const bool isFloat = true;
+
+	WAVEFORMATEXTENSIBLE wfxe;
+	wfxe.Format = toWFX();
+	wfxe.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+	wfxe.Format.cbSize = sizeof(wfxe) - sizeof(wfxe.Format);
+	wfxe.Samples.wValidBitsPerSample = sampleWidth * 8;
+	wfxe.dwChannelMask = audio_chunk::g_channel_config_to_wfx(this->chanMask);
+	wfxe.SubFormat = isFloat ? KSDATAFORMAT_SUBTYPE_IEEE_FLOAT : KSDATAFORMAT_SUBTYPE_PCM;
+	
+	return wfxe;
+}
+
+WAVEFORMATEX audio_chunk::spec_t::toWFXWithBPS(uint32_t bps) const {
+	const uint32_t sampleWidth = (bps+7)/8;
+
+	WAVEFORMATEX wfx = {};
+	wfx.wFormatTag = WAVE_FORMAT_PCM;
+	wfx.nChannels = chanCount;
+	wfx.nSamplesPerSec = sampleRate;
+	wfx.nAvgBytesPerSec = sampleRate * chanCount * sampleWidth;
+	wfx.nBlockAlign = chanCount * sampleWidth;
+	wfx.wBitsPerSample = sampleWidth * 8;
+	return wfx;
+}
+
+WAVEFORMATEXTENSIBLE audio_chunk::spec_t::toWFXEXWithBPS(uint32_t bps) const {
+	const uint32_t sampleWidth = (bps + 7) / 8;
+	const bool isFloat = false;
+
+	WAVEFORMATEXTENSIBLE wfxe;
+	wfxe.Format = toWFXWithBPS(bps);
+	wfxe.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+	wfxe.Format.cbSize = sizeof(wfxe) - sizeof(wfxe.Format);
+	wfxe.Samples.wValidBitsPerSample = sampleWidth * 8;
+	wfxe.dwChannelMask = audio_chunk::g_channel_config_to_wfx(this->chanMask);
+	wfxe.SubFormat = isFloat ? KSDATAFORMAT_SUBTYPE_IEEE_FLOAT : KSDATAFORMAT_SUBTYPE_PCM;
+
+	return wfxe;
+}
+#endif // _WIN32
+
+void audio_chunk::append(const audio_chunk& other) {
+	if (other.get_spec() != this->get_spec()) {
+		throw pfc::exception_invalid_params();
 	}
-	return samples + audio_math::time_to_samples(acc, rate );	
+
+	this->grow_data_size(get_used_size() + other.get_used_size());
+	audio_sample* p = this->get_data() + get_used_size();
+	memcpy(p, other.get_data(), other.get_used_size() * sizeof(audio_sample));
+	set_sample_count(get_sample_count() + other.get_sample_count());
 }

@@ -1,3 +1,6 @@
+#pragma once
+#include "filesystem.h" // FB2K_STREAM_READER_OVERLOAD, FB2K_STREAM_WRITER_OVERLOAD
+
 struct hasher_md5_state {
 	char m_data[128];
 };
@@ -6,12 +9,26 @@ struct hasher_md5_result {
 	char m_data[16];
 
 	t_uint64 xorHalve() const;
-
+	GUID asGUID() const;
+	pfc::string8 asString() const;
+    pfc::string8 toString() const { return asString(); }
+    GUID toGUID() const;
+    
 	static hasher_md5_result null() {hasher_md5_result h = {}; return h;}
+	static int compare(hasher_md5_result const & h1, hasher_md5_result const & h2) { return memcmp(&h1, &h2, sizeof(hasher_md5_result)); }
 };
+
+FB2K_STREAM_READER_OVERLOAD(hasher_md5_result) {
+	stream.read_raw(&value, sizeof(value)); return stream;
+}
+FB2K_STREAM_WRITER_OVERLOAD(hasher_md5_result) {
+	stream.write_raw(&value, sizeof(value)); return stream;
+}
 
 inline bool operator==(const hasher_md5_result & p_item1,const hasher_md5_result & p_item2) {return memcmp(&p_item1,&p_item2,sizeof(hasher_md5_result)) == 0;}
 inline bool operator!=(const hasher_md5_result & p_item1,const hasher_md5_result & p_item2) {return memcmp(&p_item1,&p_item2,sizeof(hasher_md5_result)) != 0;}
+inline bool operator>(const hasher_md5_result & p_item1, const hasher_md5_result & p_item2) { return memcmp(&p_item1, &p_item2, sizeof(hasher_md5_result)) > 0; }
+inline bool operator<(const hasher_md5_result & p_item1, const hasher_md5_result & p_item2) { return memcmp(&p_item1, &p_item2, sizeof(hasher_md5_result)) < 0; }
 
 namespace pfc {
 	template<> class traits_t<hasher_md5_state> : public traits_rawobject {};
@@ -42,8 +59,9 @@ public:
 	
 	//! Helper
 	void process_string(hasher_md5_state & p_state,const char * p_string,t_size p_length = ~0) {return process(p_state,p_string,pfc::strlen_max(p_string,p_length));}
+	hasher_md5_state initialize() { hasher_md5_state ret; initialize(ret); return ret; }
 
-	FB2K_MAKE_SERVICE_INTERFACE_ENTRYPOINT(hasher_md5);
+	FB2K_MAKE_SERVICE_COREAPI(hasher_md5);
 };
 
 
@@ -64,12 +82,13 @@ public:
 	}
 private:
 	hasher_md5_state m_state;
-	static_api_ptr_t<hasher_md5> m_hasher;	
+	const hasher_md5::ptr m_hasher = hasher_md5::get();
 };
+
 template<bool isBigEndian = false>
 class stream_formatter_hasher_md5 : public stream_writer_formatter<isBigEndian> {
 public:
-	stream_formatter_hasher_md5() : stream_writer_formatter<isBigEndian>(_m_stream,_m_abort) {}
+	stream_formatter_hasher_md5() : stream_writer_formatter<isBigEndian>(_m_stream,fb2k::noAbort) {}
 
 	hasher_md5_result result() const {
 		return _m_stream.result();
@@ -78,6 +97,5 @@ public:
 		return hasher_md5::guid_from_result(result());
 	}
 private:
-	abort_callback_dummy _m_abort;
 	stream_writer_hasher_md5 _m_stream;
 };

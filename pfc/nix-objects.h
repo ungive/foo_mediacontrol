@@ -1,3 +1,5 @@
+#pragma once
+
 #include <sys/select.h>
 #include <sys/time.h>
 #include <set>
@@ -67,33 +69,48 @@ namespace pfc {
     };
     
     void nixSleep(double seconds);
+    void sleepSeconds(double seconds);
+    void yield();
+    
+    typedef int eventHandle_t;
+    static constexpr eventHandle_t eventInvalid = -1;
 
     class nix_event {
     public:
-        nix_event();
+        nix_event(bool state = false);
         ~nix_event();
         
         void set_state( bool state );
 
-        bool is_set( ) {return wait_for(0); }
+        bool is_set( );
         
+        void wait_and_clear() { wait(); set_state(false); }
+        void wait() { wait_for(-1); }
         bool wait_for( double p_timeout_seconds );
         
         static bool g_wait_for( int p_event, double p_timeout_seconds );
         
-        int get_handle() const {return m_fd[0]; }
+        eventHandle_t get_handle() const {return m_fd[0]; }
 
         // Two-wait event functions, return 0 on timeout, 1 on evt1 set, 2 on evt2 set
         static int g_twoEventWait( nix_event & ev1, nix_event & ev2, double timeout );
         static int g_twoEventWait( int h1, int h2, double timeOut );
+        
+        // Multi-wait. Returns SIZE_MAX on timeout, 0 based event index if either event becomes set.
+        static size_t g_multiWait( const eventHandle_t * events, size_t count, double timeout );
+        static size_t g_multiWait(std::initializer_list<eventHandle_t> const & arg, double timeout);
 
     private:
-        nix_event(nix_event const&);
-        void operator=(nix_event const&);
+        nix_event(nix_event const&) = delete;
+        void operator=(nix_event const&) = delete;
         int m_fd[2];
     };
-    
+
+    typedef nix_event event;
+
     double nixGetTime();
+    typedef uint64_t tickcount_t;
+    tickcount_t getTickCount();
 
     bool nixReadSymLink( string_base & strOut, const char * path );
     bool nixSelfProcessPath( string_base & strOut );
@@ -103,6 +120,11 @@ namespace pfc {
     bool isShiftKeyPressed();
     bool isCtrlKeyPressed();
     bool isAltKeyPressed();
+
+#ifdef __APPLE__
+    bool appleRecycleFile( const char * path );
+    void appleSetThreadDescription( const char * str );
+#endif
 }
 
 void uSleepSeconds( double seconds, bool );

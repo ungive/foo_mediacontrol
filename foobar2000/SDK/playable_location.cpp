@@ -1,9 +1,12 @@
-#include "foobar2000.h"
+#include "foobar2000-sdk-pch.h"
 
 int playable_location::g_compare(const playable_location & p_item1,const playable_location & p_item2) {
 	int ret = metadb::path_compare(p_item1.get_path(),p_item2.get_path());
 	if (ret != 0) return ret;
 	return pfc::compare_t(p_item1.get_subsong(),p_item2.get_subsong());
+}
+int playable_location::path_compare( const char * p1, const char * p2 ) {
+	return metadb::path_compare(p1, p2);
 }
 
 bool playable_location::g_equals( const playable_location & p_item1, const playable_location & p_item2) {

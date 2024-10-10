@@ -1,6 +1,23 @@
-#ifndef audio_sample_size
-#error PFC not included?
+#pragma once
+
+#include <stdint.h>
+#if SIZE_MAX < UINT64_MAX
+#define audio_sample_size 32
+#else
+#define audio_sample_size 64
 #endif
+
+#if audio_sample_size == 32
+typedef float audio_sample;
+#define audio_sample_asm dword
+#elif audio_sample_size == 64
+typedef double audio_sample;
+#define audio_sample_asm qword
+#else
+#error wrong audio_sample_size
+#endif
+
+#define audio_sample_bytes (audio_sample_size/8)
 
 /*
 PROBLEM: 

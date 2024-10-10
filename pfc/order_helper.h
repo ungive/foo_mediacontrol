@@ -1,3 +1,5 @@
+#pragma once
+
 namespace pfc {
 	PFC_DECLARE_EXCEPTION( exception_invalid_permutation, exception_invalid_params, "Invalid permutation" );
 	t_size permutation_find_reverse(t_size const * order, t_size count, t_size value);
@@ -9,6 +11,11 @@ namespace pfc {
 
 	//! Creates a permutation that moves selected items in a list box by the specified delta-offset.
 	void create_move_items_permutation(t_size * p_output,t_size p_count,const class bit_array & p_selection,int p_delta);
+    
+    void create_move_item_permutation( size_t * p_output, size_t p_count, size_t from, size_t to );
+    bool create_drop_permutation(size_t * out, size_t itemCount, pfc::bit_array const & maskSelected, size_t insertMark );
+
+	bool is_identity(size_t const* order, size_t count);
 }
 
 class order_helper
@@ -55,6 +62,7 @@ public:
 	inline void swap(t_size ptr1,t_size ptr2) {pfc::swap_t(m_data[ptr1],m_data[ptr2]);}
 
 	const t_size * get_ptr() const {return m_data.get_ptr();}
+	t_size* get_ptr() { return m_data.get_ptr(); }
 
 	//! Insecure - may deadlock or crash on invalid permutation content. In theory faster than walking the permutation, but still O(n).
 	static t_size g_find_reverse(const t_size * order,t_size val);
