@@ -1,8 +1,16 @@
 # foo_mediacontrol
 Adds the ability for foobar2000 to interact with the Windows 10 media control overlay.
 
-### Screenshot
-![Screenshot](https://i.imgur.com/vRYA9kr.png)
+### Screenshots
+
+Screenshot of the Windows 10 Media Control overlay
+
+![Display of the current track in Windows Media Control](./assets/screenshot-windows-media-control.png)
+
+Screenshot of foobar2000 in your Discord status using
+[**Music Presence**](https://github.com/ungive/discord-music-presence)
+
+![foobar2000 in your Discord status using Music Presence](./assets/screenshot-music-presence.png)
 
 ### Compilation
 #### Windows
@@ -27,4 +35,4 @@ make package
 
 ### License
 ----
-[BSD-2-Clause](https://github.com/Hual/foo_mediacontrol/blob/master/LICENSE)
+[BSD-2-Clause](./LICENSE)
