@@ -41,6 +41,9 @@ track_data::track_data(metadb_handle_ptr metadb_data) {
 
 			delete[] genres;
 		}
+
+		// Set duration
+		m_duration = info.get_length();
 	}
 	else {
 		throw pfc::exception("Could not fetch track metadata.");

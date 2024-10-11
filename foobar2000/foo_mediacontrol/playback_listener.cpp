@@ -10,16 +10,27 @@ void playback_listener::on_playback_new_track(metadb_handle_ptr p_track) {
 		track_data data(p_track);
 
 		// update the media controls
-		media_controls::get()
-			.begin_update()
-			//.set_title(data.get_title() != track_data::empty ? data.get_title() : data.get_file_name())
-			.set_title(L"Hello world!")
-			.set_artist(data.get_artist())
-			.set_genres(data.get_genres())
-			.set_album(data.get_album())
-			.set_track_number(data.get_track_number())
-			.set_thumbnail(data.get_album_art())
-			.end_update();
+		auto controls = media_controls::get();
+		controls.begin_update();
+		controls.set_title(data.get_title() != track_data::empty ? data.get_title() : data.get_file_name());
+		controls.set_artist(data.get_artist());
+		controls.set_genres(data.get_genres());
+		controls.set_album(data.get_album());
+		controls.set_track_number(data.get_track_number());
+		controls.set_thumbnail(data.get_album_art());
+		auto duration = data.get_duration();
+		auto timeline_properties = ref new Windows::Media::SystemMediaTransportControlsTimelineProperties();
+		timeline_properties->Position = Windows::Foundation::TimeSpan{ 0 };
+		if (duration > 0) {
+			// TimeSpan's contain a time period expressed in 100-nanosecond units.
+			// https://learn.microsoft.com/en-us/uwp/api/windows.foundation.timespan
+			timeline_properties->StartTime = Windows::Foundation::TimeSpan{ 0 };
+			timeline_properties->EndTime = Windows::Foundation::TimeSpan{ static_cast<int>(duration * 1e7) };
+			timeline_properties->MinSeekTime = Windows::Foundation::TimeSpan{ 0 };
+			timeline_properties->MaxSeekTime = Windows::Foundation::TimeSpan{ static_cast<int>(duration * 1e7) };
+		}
+		controls.set_timeline_properties(timeline_properties);
+		controls.end_update();
 	}
 	catch (pfc::exception e) {
 		popup_message::g_show("Caught exception", "Error");

@@ -101,6 +101,12 @@ media_controls& media_controls::set_status(Windows::Media::MediaPlaybackStatus s
 	return *this;
 }
 
+media_controls& media_controls::set_timeline_properties(Windows::Media::SystemMediaTransportControlsTimelineProperties^ timeline_properties) {
+	m_controls->UpdateTimelineProperties(timeline_properties);
+
+	return *this;
+}
+
 void media_controls::play()
 {
 	m_controls->PlaybackStatus = Windows::Media::MediaPlaybackStatus::Playing;

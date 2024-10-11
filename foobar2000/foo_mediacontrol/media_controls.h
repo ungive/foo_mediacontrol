@@ -28,6 +28,7 @@ public:
 	media_controls& set_track_number(const wchar_t* number);
 	media_controls& set_genres(genre_data_vector& genres);
 	media_controls& set_status(Windows::Media::MediaPlaybackStatus status);
+	media_controls& set_timeline_properties(Windows::Media::SystemMediaTransportControlsTimelineProperties^ timeline_properties);
 	void play();
 	void pause();
 	void stop();

@@ -57,6 +57,10 @@ public:
 		return m_album_art;
 	}
 
+	inline double get_duration() {
+		return m_duration;
+	}
+
 	static wchar_t* const empty;
 
 private:
@@ -71,6 +75,7 @@ private:
 	genre_data_vector m_genres;
 	album_art_data::ptr m_album_art = nullptr;
 	wchar_t* m_name;
+	double m_duration;
 
 	static wchar_t* const genre_separator;
 };
