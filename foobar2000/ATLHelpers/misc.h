@@ -332,6 +332,12 @@ public:
 	}
 	int FB2KAPI service_add_ref() throw() {return ++m_counter;}
 
+	bool service_query(service_ptr& p_out, const GUID& p_guid) override {
+		// Fix 'window_service_impl_t<preferences_page_instance_impl<TDialog>>': cannot instantiate abstract class
+		// due to following members: 'bool service_base::service_query(service_ptr &,const GUID &)': is abstract
+		throw std::runtime_error("service_query() not implemented");
+	}
+
 	TEMPLATE_CONSTRUCTOR_FORWARD_FLOOD_WITH_INITIALIZER(window_service_impl_t,t_base,{m_destroyWindowInProgress = false; m_delayedDestroyInProgress = 0; })
 private:
 	void OnDestroyPassThru() {

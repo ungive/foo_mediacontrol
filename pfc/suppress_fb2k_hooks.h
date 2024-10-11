@@ -8,13 +8,15 @@ Configurations with "FB2K" suffix disable compilation of pfc-fb2k-hooks.cpp allo
 
 namespace pfc {
 	[[noreturn]] void crashImpl();
-	[[noreturn]] void crashHook() {
+	// Fix: error LNK2005: "void __cdecl pfc::crashHook(void)" (?crashHook@pfc@@YAXXZ) already defined in pfc.lib(pfc-fb2k-hooks.obj)
+	/*[[noreturn]] void crashHook() {
 		crashImpl();
-	}
+	}*/
 #ifdef _WIN32
 	BOOL winFormatSystemErrorMessageImpl(pfc::string_base & p_out, DWORD p_code);
-	BOOL winFormatSystemErrorMessageHook(pfc::string_base & p_out, DWORD p_code) {
+	// Fix: error LNK2005: "int __cdecl pfc::winFormatSystemErrorMessageHook(class pfc::string_base &,unsigned long)" (?winFormatSystemErrorMessageHook@pfc@@YAHAAVstring_base@1@K@Z) already defined in pfc.lib(pfc-fb2k-hooks.obj)
+	/*BOOL winFormatSystemErrorMessageHook(pfc::string_base& p_out, DWORD p_code) {
 		return winFormatSystemErrorMessageImpl(p_out, p_code);
-	}
+	}*/
 #endif
 }
