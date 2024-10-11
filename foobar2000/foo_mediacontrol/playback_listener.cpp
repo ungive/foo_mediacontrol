@@ -9,6 +9,10 @@ void playback_listener::on_playback_new_track(metadb_handle_ptr p_track) {
 		// create new track data from metadb handle
 		track_data data(p_track);
 
+		// Store the duration for later retrieval
+		auto duration = data.get_duration();
+		m_last_duration = duration;
+
 		// update the media controls
 		auto controls = media_controls::get();
 		controls.begin_update();
@@ -18,16 +22,15 @@ void playback_listener::on_playback_new_track(metadb_handle_ptr p_track) {
 		controls.set_album(data.get_album());
 		controls.set_track_number(data.get_track_number());
 		controls.set_thumbnail(data.get_album_art());
-		auto duration = data.get_duration();
 		auto timeline_properties = ref new Windows::Media::SystemMediaTransportControlsTimelineProperties();
 		timeline_properties->Position = Windows::Foundation::TimeSpan{ 0 };
 		if (duration > 0) {
 			// TimeSpan's contain a time period expressed in 100-nanosecond units.
 			// https://learn.microsoft.com/en-us/uwp/api/windows.foundation.timespan
 			timeline_properties->StartTime = Windows::Foundation::TimeSpan{ 0 };
-			timeline_properties->EndTime = Windows::Foundation::TimeSpan{ static_cast<int>(duration * 1e7) };
+			timeline_properties->EndTime = Windows::Foundation::TimeSpan{ static_cast<long long>(duration * 1e7) };
 			timeline_properties->MinSeekTime = Windows::Foundation::TimeSpan{ 0 };
-			timeline_properties->MaxSeekTime = Windows::Foundation::TimeSpan{ static_cast<int>(duration * 1e7) };
+			timeline_properties->MaxSeekTime = Windows::Foundation::TimeSpan{ static_cast<long long>(duration * 1e7) };
 		}
 		controls.set_timeline_properties(timeline_properties);
 		controls.end_update();
@@ -54,4 +57,17 @@ void playback_listener::on_playback_pause(bool p_state) {
 	else {
 		media_controls::get().play();
 	}
+}
+
+void playback_listener::on_playback_seek(double p_time) {
+	auto timeline_properties = ref new Windows::Media::SystemMediaTransportControlsTimelineProperties();
+	timeline_properties->Position = Windows::Foundation::TimeSpan{ static_cast<long long>(p_time * 1e7) };
+	if (m_last_duration > 0) {
+		timeline_properties->StartTime = Windows::Foundation::TimeSpan{ 0 };
+		timeline_properties->EndTime = Windows::Foundation::TimeSpan{ static_cast<long long>(m_last_duration * 1e7) };
+		timeline_properties->MinSeekTime = Windows::Foundation::TimeSpan{ 0 };
+		timeline_properties->MaxSeekTime = Windows::Foundation::TimeSpan{ static_cast<long long>(m_last_duration * 1e7) };
+	}
+	media_controls::get()
+		.set_timeline_properties(timeline_properties);
 }

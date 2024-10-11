@@ -6,5 +6,7 @@ private:
 	void on_playback_new_track(metadb_handle_ptr p_track);
 	void on_playback_stop(play_control::t_stop_reason p_reason);
 	void on_playback_pause(bool p_state);
+	void on_playback_seek(double p_time);
 
+	double m_last_duration{ -1.0 };
 };
