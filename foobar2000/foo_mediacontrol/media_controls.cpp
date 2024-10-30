@@ -30,7 +30,7 @@ media_controls::media_controls() {
 
 media_controls::~media_controls() {
 	m_controls->ButtonPressed -= m_event_id;
-	begin_update();
+	reset();
 }
 
 media_controls& media_controls::toggle(bool toggle) {
@@ -124,7 +124,7 @@ void media_controls::stop()
 	m_controls->IsEnabled = false;
 }
 
-media_controls& media_controls::begin_update() {
+media_controls& media_controls::reset() {
 	m_updater->ClearAll();
 	m_updater->Type = Windows::Media::MediaPlaybackType::Music;
 
@@ -136,7 +136,7 @@ media_controls& media_controls::begin_update() {
 	return *this;
 }
 
-void media_controls::end_update() {
+void media_controls::apply_changes() {
 	m_updater->Update();
 }
 

@@ -13,8 +13,8 @@ public:
 	media_controls();
 	~media_controls();
 	media_controls& toggle(bool toggle);
-	media_controls& begin_update();
-	void end_update();
+	media_controls& reset();
+	void apply_changes();
 	media_controls& set_thumbnail(album_art_data::ptr data);
 	media_controls& set_title(std::wstring title);
 	media_controls& set_title(const wchar_t* title);

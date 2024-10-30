@@ -36,7 +36,7 @@ void playback_listener::on_playback_new_track(metadb_handle_ptr p_track) {
 
 		// update the media controls
 		media_controls::get()
-			.begin_update()
+			.reset()
 			.set_title(data.get_title() != track_data::empty ? data.get_title() : data.get_file_name())
 			.set_artist(data.get_artist())
 			.set_genres(data.get_genres())
@@ -44,7 +44,7 @@ void playback_listener::on_playback_new_track(metadb_handle_ptr p_track) {
 			.set_track_number(data.get_track_number())
 			.set_thumbnail(data.get_album_art())
 			.set_timeline_properties(timeline_properties_for_duration(duration))
-			.end_update();
+			.apply_changes();
 	}
 	catch (pfc::exception e) {
 		popup_message::g_show("Caught exception", "Error");
