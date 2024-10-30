@@ -71,6 +71,8 @@ void playback_listener::on_playback_pause(bool p_state) {
 }
 
 void playback_listener::on_playback_seek(double p_time) {
+	if (m_last_duration >= 0.0) {
 	media_controls::get()
 		.set_timeline_properties(timeline_properties_for_duration(m_last_duration, p_time));
+}
 }
