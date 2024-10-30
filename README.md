@@ -25,7 +25,15 @@ Compilation requires Windows 10 SDK version 10.0.10240.0 or higher.
 ### Packaging
 #### Windows
 
-Make sure you have make installed. Open a CMD and enter:
+Build the project by opening Visual Studio and following these steps:
+
+- Go to "Build" and click "Clean Solution"
+- Select "Release" and "x86". Go to "Build" and click "Rebuild foo_mediacontrol"
+- Select "Release" and "x64". Go to "Build" and click "Rebuild foo_mediacontrol"
+- Wait until both builds completed successfully
+
+Now open a command prompt and enter the following command,
+presuming you have `make` installed:
 
 ```
 make package
