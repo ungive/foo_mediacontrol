@@ -14,8 +14,8 @@ static inline Windows::Foundation::TimeSpan timespan_for_duration(double duratio
 static Windows::Media::SystemMediaTransportControlsTimelineProperties^
 timeline_properties_for_duration(double duration_s, double position_s = 0.0)
 {
-	position_s = max(0.0, position_s);
 	duration_s = max(0.0, duration_s);
+	position_s = max(0.0, min(position_s, duration_s));
 	auto timeline_properties = ref new Windows::Media::SystemMediaTransportControlsTimelineProperties();
 	timeline_properties->Position = timespan_for_duration(position_s);
 	timeline_properties->StartTime = timespan_for_duration(0);
