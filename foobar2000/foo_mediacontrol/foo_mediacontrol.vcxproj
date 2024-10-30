@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -172,7 +172,7 @@
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\ATLHelpers\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..;../..;$(SolutionDir)..\ATLHelpers\Include</AdditionalIncludeDirectories>
       <AdditionalUsingDirectories>$(WindowsSdkDir)References\Windows;$(WindowsSdkDir)References\CommonConfiguration\Neutral;$(VCInstallDir)vcpackages;$(DevEnvDir)VC\vcpackages;$(WindowsSDK)UnionMetadata;$(WindowsSDK_UnionMetadataPath);$(AdditionalUsingDirectories);%(AdditionalUsingDirectories)</AdditionalUsingDirectories>
       <CompileAsWinRT>true</CompileAsWinRT>
       <ForcedUsingFiles>
